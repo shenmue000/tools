@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convert Audacity point labels to region labels (free, in your browser)</title>
+<meta name="description" content="Turn Audacity point labels (markers) into region labels: pair markers 1+2, 3+4, or make each region run to the next marker. Preview, then download a label file to import back into Audacity.">
+<style>
+  :root { --ink:#1d2433; --muted:#5b6475; --line:#e3e6ec; --bg:#f7f8fa; --card:#fff; --accent:#1f6f5c; --warn:#b4541a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.8rem; line-height:1.2; margin: 0 0 8px; }
+  h2 { font-size: 1.2rem; margin: 28px 0 10px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; }
+  textarea { width:100%; min-height:160px; font:14px/1.4 ui-monospace,Menlo,Consolas,monospace; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  label.opt { display:block; margin:6px 0; }
+  .row { display:flex; flex-wrap:wrap; gap:18px; }
+  .row > div { flex:1 1 240px; }
+  .btn { display:inline-block; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; text-decoration:none; }
+  .btn.secondary { background:#e8efed; color:var(--accent); }
+  input[type=number] { width:9em; font:inherit; padding:4px 6px; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  th, td { text-align:left; padding:5px 8px; border-top:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.t { font-family: ui-monospace,Menlo,Consolas,monospace; }
+  .notes { color:var(--warn); font-size:.95rem; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  footer { color:var(--muted); font-size:.9rem; margin-top:40px; }
+</style>
+<!-- GoatCounter (cookie-less, no personal data): uncomment and set the site code. -->
+<!-- <script data-goatcounter="https://SITECODE.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script> -->
+</head>
+<body>
+<main>
+  <h1>Convert Audacity point labels to region labels</h1>
+  <p class="lead">Placed markers (point labels) while listening, and now need regions between them? Paste or open your exported labels, choose how to pair them, check the preview, and download a file to import back into Audacity. Everything runs in your browser; nothing is uploaded.</p>
+
+  <div class="card">
+    <strong>1. Your labels</strong>
+    <p class="muted">In Audacity: <b>File → Export → Export Labels…</b> Then open that .txt file here, or paste its contents.</p>
+    <p><input type="file" id="file" accept=".txt,text/plain"> <button class="btn secondary" id="demo" type="button">Try an example</button></p>
+    <textarea id="input" spellcheck="false" placeholder="0.340000	0.340000	Intro&#10;12.500000	12.500000	Verse 1&#10;30.250000	30.250000	Chorus"></textarea>
+  </div>
+
+  <div class="card row">
+    <div>
+      <strong>2. How to make regions</strong>
+      <label class="opt"><input type="radio" name="mode" value="chain" checked> Each marker to the next one <span class="muted">(regions touch: end of one = start of the next)</span></label>
+      <label class="opt"><input type="radio" name="mode" value="pairs"> Pairs: markers 1+2, 3+4, … <span class="muted">(each pair marks a start and an end)</span></label>
+      <label class="opt" id="finalWrap">Last region ends at <input type="number" id="finalEnd" min="0" step="any" placeholder="e.g. 245.0"> seconds <span class="muted">(optional: the length of the audio)</span></label>
+    </div>
+    <div>
+      <strong>3. Region names</strong>
+      <label class="opt"><input type="radio" name="naming" value="first" checked> Text of the starting marker</label>
+      <label class="opt"><input type="radio" name="naming" value="join"> Both markers' text ("Intro - Verse 1")</label>
+      <label class="opt"><input type="radio" name="naming" value="number"> Numbered ("Region 1", "Region 2", …)</label>
+      <label class="opt"><input type="checkbox" id="keep" checked> Keep region labels that are already in the file</label>
+    </div>
+  </div>
+
+  <h2>Preview</h2>
+  <div id="summary" class="muted">Paste or open labels to see the result.</div>
+  <div id="notes" class="notes"></div>
+  <div class="card" style="overflow-x:auto"><table id="preview"><thead><tr><th>#</th><th>Start (s)</th><th>End (s)</th><th>Length</th><th>Name</th></tr></thead><tbody></tbody></table></div>
+  <p><button class="btn" id="download" type="button" disabled>Download region labels (.txt)</button>
+     <button class="btn secondary" id="copy" type="button" disabled>Copy</button></p>
+  <p class="muted">Then in Audacity: <b>File → Import → Labels…</b> and choose the downloaded file. It is added as a new label track, so your original markers stay untouched.</p>
+
+  <h2>Questions</h2>
+  <p><b>Does this change my audio?</b> No. It only reads and writes the small text file Audacity uses for labels.</p>
+  <p><b>What about labels with frequency ranges (spectral selection)?</b> Their frequency line is kept with the region that starts at that marker.</p>
+  <p><b>My file uses commas for decimals.</b> That's fine; both "12.5" and "12,5" are read. The download always uses a dot, which Audacity accepts.</p>
+
+  <footer>A small free tool. Visits are counted anonymously (no cookies, no personal data); your labels never leave your computer. <a href="../">More free tools</a></footer>
+</main>
+<script>
+// Audacity label conversion: point labels -> region labels. Browser + Node.
+(function (root) {
+  "use strict";
+  // Parse an Audacity label export. Lines: start<TAB>end<TAB>text. Spectral labels add a
+  // following line "\<TAB>low<TAB>high" (kept attached to its label). Accepts spaces or
+  // tabs and comma decimals, which some locales or spreadsheets produce.
+  function parse(text) {
+    const labels = [], problems = [];
+    const lines = text.replace(/^﻿/, "").split(/\r\n|\r|\n/);
+    lines.forEach((line, i) => {
+      if (!line.trim()) return;
+      if (/^\\/.test(line)) {
+        if (labels.length) labels[labels.length - 1].freq = line;
+        return;
+      }
+      let parts = line.split("\t");
+      if (parts.length < 2) {
+        const m = line.match(/^\s*(\S+)\s+(\S+)\s*(.*)$/);
+        parts = m ? [m[1], m[2], m[3]] : [line];
+      }
+      const num = (s) => Number(String(s).trim().replace(",", "."));
+      const start = num(parts[0]), end = num(parts[1]);
+      if (!isFinite(start) || !isFinite(end) || parts[0].trim() === "" || parts[1].trim() === "") {
+        problems.push({ line: i + 1, text: line, reason: "not a label line (expected start, end, text)" });
+        return;
+      }
+      labels.push({ start, end, text: parts.slice(2).join("\t").trim(), line: i + 1 });
+    });
+    labels.sort((a, b) => a.start - b.start || a.end - b.end);
+    return { labels, problems };
+  }
+
+  const isPoint = (l) => Math.abs(l.end - l.start) < 1e-9;
+
+  // mode "chain": each point label starts a region that ends at the next point label.
+  //   The last point either ends at `finalEnd` (if given) or is dropped (reported).
+  // mode "pairs": points 1+2, 3+4, ... become regions; an odd one out is reported.
+  // naming: "first" (text of the starting label), "join" ("A - B"), "number" ("Region 1").
+  // Region labels already in the input are kept unchanged when keepRegions is true.
+  function convert(labels, opts) {
+    const o = Object.assign({ mode: "chain", naming: "first", keepRegions: true, finalEnd: null, prefix: "Region" }, opts || {});
+    const points = labels.filter(isPoint), regions = labels.filter((l) => !isPoint(l));
+    const out = [], notes = [];
+    const name = (a, b, n) => {
+      if (o.naming === "number") return `${o.prefix} ${n}`;
+      if (o.naming === "join") return [a.text, b ? b.text : ""].filter(Boolean).join(" - ");
+      return a.text;
+    };
+    if (o.mode === "pairs") {
+      for (let i = 0; i + 1 < points.length; i += 2) {
+        const a = points[i], b = points[i + 1];
+        out.push({ start: a.start, end: b.start, text: name(a, b, out.length + 1), freq: a.freq });
+      }
+      if (points.length % 2) notes.push(`The last point label (at ${fmt(points[points.length - 1].start)} s) has no partner, so it was left out.`);
+    } else {
+      for (let i = 0; i < points.length; i++) {
+        const a = points[i], b = points[i + 1];
+        if (b) {
+          if (b.start - a.start < 1e-9) { notes.push(`Two point labels share the time ${fmt(a.start)} s; the first was skipped.`); continue; }
+          out.push({ start: a.start, end: b.start, text: name(a, b, out.length + 1), freq: a.freq });
+        } else if (o.finalEnd != null && isFinite(o.finalEnd) && o.finalEnd > a.start) {
+          out.push({ start: a.start, end: Number(o.finalEnd), text: name(a, null, out.length + 1), freq: a.freq });
+        } else if (points.length) {
+          notes.push(`The last point label (at ${fmt(a.start)} s) has no next label, so it was left out. Enter an end time (e.g. the length of the audio) to keep it.`);
+        }
+      }
+    }
+    let result = out;
+    if (o.keepRegions && regions.length) {
+      result = out.concat(regions.map((r) => ({ start: r.start, end: r.end, text: r.text, freq: r.freq })))
+        .sort((a, b) => a.start - b.start || a.end - b.end);
+      notes.push(`${regions.length} existing region label(s) were kept unchanged.`);
+    }
+    return { regions: result, notes, pointCount: points.length, regionCount: regions.length };
+  }
+
+  function fmt(x) { return Number(x).toFixed(6); }
+  function serialize(regions) {
+    return regions.map((r) => `${fmt(r.start)}\t${fmt(r.end)}\t${r.text}` + (r.freq ? `\n${r.freq}` : "")).join("\n") + (regions.length ? "\n" : "");
+  }
+
+  const api = { parse, convert, serialize, isPoint, fmt };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.AudacityLabels = api;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const DEMO = "0.000000\t0.000000\tIntro\n14.200000\t14.200000\tVerse 1\n41.750000\t41.750000\tChorus\n63.100000\t63.100000\tVerse 2\n90.400000\t90.400000\tChorus\n112.000000\t112.000000\tOutro\n";
+  let last = [];
+  let fromDemo = false;
+  // Count a real export (own labels, not the example) as an anonymous GoatCounter event, if the counter is loaded.
+  function countExport(kind) {
+    if (fromDemo || !window.goatcounter || !window.goatcounter.count) return;
+    window.goatcounter.count({ path: "audacity-labels/" + kind, title: "Audacity labels " + kind, event: true });
+  }
+  const val = (name) => document.querySelector(`input[name=${name}]:checked`).value;
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function render() {
+    const text = $("input").value;
+    const tbody = document.querySelector("#preview tbody");
+    $("finalWrap").style.display = val("mode") === "chain" ? "block" : "none";
+    if (!text.trim()) { tbody.innerHTML = ""; $("summary").textContent = "Paste or open labels to see the result."; $("notes").innerHTML = ""; last = []; toggle(); return; }
+    const p = AudacityLabels.parse(text);
+    const fe = $("finalEnd").value.trim();
+    const c = AudacityLabels.convert(p.labels, { mode: val("mode"), naming: val("naming"), keepRegions: $("keep").checked, finalEnd: fe === "" ? null : Number(fe.replace(",", ".")) });
+    last = c.regions;
+    $("summary").textContent = `Read ${c.pointCount} point label(s) and ${c.regionCount} region label(s) → ${c.regions.length} region label(s).`;
+    const notes = c.notes.slice();
+    p.problems.slice(0, 5).forEach((q) => notes.push(`Line ${q.line} was skipped: ${q.reason}.`));
+    if (p.problems.length > 5) notes.push(`${p.problems.length - 5} more lines were skipped.`);
+    if (!c.pointCount) notes.push("No point labels found (a point label has the same start and end time).");
+    $("notes").innerHTML = notes.map((n) => `<div>• ${esc(n)}</div>`).join("");
+    tbody.innerHTML = c.regions.map((r, i) => `<tr><td>${i + 1}</td><td class="t">${AudacityLabels.fmt(r.start)}</td><td class="t">${AudacityLabels.fmt(r.end)}</td><td class="t">${(r.end - r.start).toFixed(3)}</td><td>${esc(r.text)}</td></tr>`).join("");
+    toggle();
+  }
+  function toggle() { $("download").disabled = $("copy").disabled = !last.length; }
+  $("input").addEventListener("input", () => { fromDemo = false; render(); });
+  document.querySelectorAll("input[name=mode], input[name=naming], #keep").forEach((el) => el.addEventListener("change", render));
+  $("finalEnd").addEventListener("input", render);
+  $("demo").addEventListener("click", () => { $("input").value = DEMO; fromDemo = true; render(); });
+  $("file").addEventListener("change", (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = () => { $("input").value = r.result; fromDemo = false; render(); }; r.readAsText(f);
+  });
+  $("download").addEventListener("click", () => {
+    const blob = new Blob([AudacityLabels.serialize(last)], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "region-labels.txt";
+    countExport("download"); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("copy").addEventListener("click", () => { countExport("copy"); navigator.clipboard && navigator.clipboard.writeText(AudacityLabels.serialize(last)); $("copy").textContent = "Copied"; setTimeout(() => { $("copy").textContent = "Copy"; }, 1500); });
+  render();
+})();
+</script>
+</body>
+</html>
