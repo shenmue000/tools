@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Import historical energy data into Home Assistant: CSV to statistics file (free, in your browser)</title>
+<meta name="description" content="Turn your utility's or meter's energy CSV (15-minute, 30-minute or hourly, or meter readings) into the hourly file the Import Statistics integration reads, so past usage shows in the Energy Dashboard. Runs in your browser; nothing is uploaded.">
+<style>
+  :root { --ink:#1d2433; --muted:#5b6475; --line:#e3e6ec; --bg:#f7f8fa; --card:#fff; --accent:#1f6f5c; --warn:#b4541a; --err:#a8261d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.8rem; line-height:1.2; margin: 0 0 8px; }
+  h2 { font-size: 1.2rem; margin: 28px 0 10px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; }
+  textarea { width:100%; min-height:140px; font:13px/1.4 ui-monospace,Menlo,Consolas,monospace; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  label.opt { display:block; margin:6px 0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px 22px; }
+  .field { margin: 6px 0; }
+  .field > span { display:block; font-size:.9rem; color:var(--muted); }
+  select, input[type=text], input[type=number] { font:inherit; padding:5px 7px; border:1px solid var(--line); border-radius:6px; width:100%; max-width:320px; background:#fff; }
+  .btn { display:inline-block; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.secondary { background:#e8efed; color:var(--accent); }
+  .btn:disabled { opacity:.45; cursor:default; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { text-align:left; padding:4px 8px; border-top:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.t { font-family: ui-monospace,Menlo,Consolas,monospace; }
+  .notes { color:var(--warn); font-size:.95rem; }
+  .error { color:var(--err); font-weight:600; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  pre { background:#f1f3f6; border-radius:8px; padding:10px; overflow-x:auto; font-size:.88rem; }
+  ol li { margin: 4px 0; }
+  footer { color:var(--muted); font-size:.9rem; margin-top:40px; }
+</style>
+<!-- GoatCounter: cookie-less, no personal data -->
+<script data-goatcounter="https://smalltools.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</head>
+<body>
+<main>
+  <h1>Import historical energy data into Home Assistant</h1>
+  <p class="lead">Your power company or meter gives you a CSV of past usage, but Home Assistant has no import button. This tool turns that CSV into the hourly file read by the <a href="https://github.com/klausj1/homeassistant-statistics">Import Statistics</a> integration, so the history shows up in the Energy Dashboard. It runs in your browser; your data is not uploaded anywhere.</p>
+
+  <div class="card">
+    <strong>1. Your CSV</strong>
+    <p class="muted">15-minute, 30-minute or hourly usage, or meter readings. Comma, semicolon or tab separated; account lines at the top are skipped.</p>
+    <p><input type="file" id="file" accept=".csv,.tsv,.txt,text/csv,text/plain"> <button class="btn secondary" id="demo" type="button">Try an example</button></p>
+    <textarea id="input" spellcheck="false" placeholder="Date;Time;Consumption (kWh)&#10;01.03.2024;00:15;0,25&#10;01.03.2024;00:30;0,22"></textarea>
+  </div>
+
+  <div class="card" id="mapping" hidden>
+    <strong>2. Check how the file was read</strong>
+    <div class="grid">
+      <label class="field"><span>Date / time column</span><select id="dateCol"></select></label>
+      <label class="field"><span>Separate time column</span><select id="timeCol"></select></label>
+      <label class="field"><span>Usage column</span><select id="valueCol"></select></label>
+      <label class="field"><span>Date format</span><select id="dateOrder"><option value="YMD">year-month-day</option><option value="DMY">day-month-year</option><option value="MDY">month-day-year (US)</option></select></label>
+      <label class="field"><span>Decimal mark</span><select id="decimal"><option value=".">dot (0.25)</option><option value=",">comma (0,25)</option></select></label>
+      <label class="field"><span>Unit in the file</span><select id="unit"><option value="kWh">kWh</option><option value="Wh">Wh (converted to kWh)</option><option value="m³">m³ (gas or water)</option><option value="L">L (water)</option></select></label>
+      <label class="field"><span>The numbers are</span><select id="valueType"><option value="interval">usage per interval</option><option value="reading">meter readings (a running total)</option></select></label>
+      <label class="field" id="labelWrap"><span>Each time marks the interval's</span><select id="label"><option value="start">start (00:00 = 00:00–00:15)</option><option value="end">end (00:15 = 00:00–00:15)</option></select></label>
+    </div>
+    <p class="muted" id="orderHint"></p>
+  </div>
+
+  <div class="card" id="output" hidden>
+    <strong>3. What to create</strong>
+    <div class="grid">
+      <label class="field"><span>Statistic ID</span><input type="text" id="statId" value="sensor:imported_grid_energy" spellcheck="false"></label>
+      <div class="field"><span>File type</span>
+        <label class="opt"><input type="radio" name="kind" value="sum" checked> New statistic (sum/state)</label>
+        <label class="opt"><input type="radio" name="kind" value="delta"> Add history to an existing sensor (delta)</label>
+      </div>
+      <label class="field" id="startWrap"><span>Starting total (usually 0)</span><input type="number" id="startSum" value="0" step="any"></label>
+    </div>
+    <p class="muted" id="kindHint"></p>
+  </div>
+
+  <h2>Preview</h2>
+  <div id="summary" class="muted">Paste or open a CSV to see the result.</div>
+  <div id="notes" class="notes"></div>
+  <div class="card" style="overflow-x:auto"><table id="preview"><thead></thead><tbody></tbody></table></div>
+  <p><button class="btn" id="download" type="button" disabled>Download import file (.tsv)</button>
+     <button class="btn secondary" id="copyYaml" type="button" disabled>Copy the action YAML</button></p>
+  <pre id="yaml" hidden></pre>
+
+  <h2>How to import it</h2>
+  <ol>
+    <li><b>Back up first</b> (Settings → System → Backups). An import replaces any values already stored for the same hours.</li>
+    <li>Install <b>Import Statistics</b> from HACS (search "Import Statistics") and restart Home Assistant.</li>
+    <li>Copy the downloaded .tsv into your Home Assistant <code>config</code> folder (for example with the File editor or Samba add-on).</li>
+    <li>Go to <b>Developer Tools → Actions</b>, switch to YAML mode, paste the copied YAML and run it.</li>
+    <li>For a new statistic: in <b>Settings → Dashboards → Energy</b>, add it as a grid consumption source. Statistic IDs with a colon (<code>sensor:…</code>) are "external" statistics, which don't need an existing entity.</li>
+  </ol>
+
+  <h2>Questions</h2>
+  <p><b>New statistic or existing sensor?</b> A new statistic (sum/state) is the safest: it can't collide with what your sensor already recorded. Use "existing sensor (delta)" only to add history before your sensor's first recorded hour. The integration then joins the history onto the existing data, but it needs at least one existing value next to the imported range and no missing hours in between (see the integration's notes on <a href="https://github.com/klausj1/homeassistant-statistics/blob/main/docs/user/counters.md#delta-import">delta import</a>). The unit must match the sensor's unit.</p>
+  <p><b>Why hourly?</b> Home Assistant's long-term statistics are hourly, and the integration only accepts full hours, so 15- and 30-minute values are added up per hour. Daily or monthly totals are refused, because splitting them into hours would be made-up data.</p>
+  <p><b>Daylight saving time?</b> Times are written as they appear in your file and read in your Home Assistant time zone. The repeated hour in autumn is added into one hour (with a note), and the skipped hour in spring shows as a gap. If your file has UTC offsets (like <code>+01:00</code> or <code>Z</code>), everything is converted to UTC and the YAML says so.</p>
+  <p><b>Is my data sent anywhere?</b> No. The page reads the file in your browser. Only an anonymous page-visit count is recorded (no cookies, no personal data).</p>
+  <p><b>Not affiliated</b> with Home Assistant, Nabu Casa or the Import Statistics integration. Check the preview before importing.</p>
+  <footer>A small free tool. <a href="../">More free tools</a></footer>
+</main>
+<script>
+// Utility / meter CSV -> Home Assistant long-term statistics import file
+// (format of the "Import Statistics" custom integration, klausj1/homeassistant-statistics).
+// Browser + Node. No network, no dependencies.
+(function (root) {
+  "use strict";
+
+  // ---------- CSV ----------
+  function splitRows(text, delim) {
+    const rows = [];
+    let row = [], field = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+        else field += c;
+      } else if (c === '"' && field === "") q = true;
+      else if (c === delim) { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        if (row.some((f) => f.trim() !== "")) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+    row.push(field);
+    if (row.some((f) => f.trim() !== "")) rows.push(row);
+    return rows.map((r) => r.map((f) => f.trim()));
+  }
+
+  function mode(arr) {
+    const m = new Map();
+    let best = null, n = 0;
+    for (const v of arr) { const k = (m.get(v) || 0) + 1; m.set(v, k); if (k > n) { n = k; best = v; } }
+    return { value: best, count: n };
+  }
+
+  function detectDelimiter(text) {
+    const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim()).slice(0, 50);
+    let best = ",", score = -1;
+    for (const d of [",", ";", "\t", "|"]) {
+      const counts = lines.map((l) => splitRows(l, d)[0] ? splitRows(l, d)[0].length : 1);
+      const m = mode(counts);
+      const s = m.value > 1 ? m.count * 100 + m.value : 0;
+      if (s > score) { score = s; best = d; }
+    }
+    return best;
+  }
+
+  // ---------- numbers ----------
+  // Reads "1,234.5", "1.234,5", "0,25", "0.25 kWh". decimal: "." or ",".
+  function parseNumber(s, decimal) {
+    if (s == null) return NaN;
+    let t = String(s).trim().replace(/\s*[a-zA-Z³²°%]+\s*$/, "").replace(/[\s ']/g, "");
+    if (t === "" || !/[0-9]/.test(t)) return NaN;
+    if (decimal === ",") t = t.replace(/\./g, "").replace(",", ".");
+    else t = t.replace(/,/g, "");
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t)) return NaN;
+    return Number(t);
+  }
+
+  function guessDecimal(values) {
+    let comma = 0, dot = 0;
+    for (const v of values) {
+      const s = String(v).trim();
+      if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s) || /^-?\d+,\d+$/.test(s)) comma++;
+      else if (/^-?\d{1,3}(,\d{3})+\.\d+$/.test(s) || /^-?\d+\.\d+$/.test(s)) dot++;
+    }
+    return comma > dot ? "," : ".";
+  }
+
+  // ---------- dates ----------
+  // Returns {a,b,c,h,mi,s,off} with date parts in file order, or null. Accepts
+  // "2024-03-01 13:15", "01.03.2024 13:15:00", "3/1/2024 1:15 PM", ISO with T and Z/+01:00,
+  // and a time range like "01.03.2024 13:15 - 13:30" (first time is used).
+  const DATE_RE = /^(\d{1,4})[-./](\d{1,2})[-./](\d{1,4})(?:[T\s,]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?\s*([AaPp][Mm])?)?\s*(Z|[+-]\d{2}:?\d{2})?(?:\s*(?:-|–|to|bis)\s*.*)?$/;
+  const TIME_RE = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?(?:\s*(?:-|–|to|bis)\s*.*)?$/;
+
+  function splitDate(s) {
+    const m = String(s).trim().match(DATE_RE);
+    if (!m) return null;
+    let h = m[4] != null ? Number(m[4]) : 0;
+    const ap = m[7] && m[7].toLowerCase();
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    let off = null;
+    if (m[8]) {
+      if (m[8] === "Z") off = 0;
+      else { const z = m[8].replace(":", ""); off = (z[0] === "-" ? -1 : 1) * (Number(z.slice(1, 3)) * 60 + Number(z.slice(3, 5))); }
+    }
+    return { a: m[1], b: m[2], c: m[3], h, mi: m[5] != null ? Number(m[5]) : 0, s: m[6] != null ? Number(m[6]) : 0, off, hasTime: m[4] != null };
+  }
+
+  function parseTime(s) {
+    const m = String(s).trim().match(TIME_RE);
+    if (!m) return null;
+    let h = Number(m[1]);
+    const ap = m[4] && m[4].toLowerCase();
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    if (h > 24 || Number(m[2]) > 59) return null;
+    return { h, mi: Number(m[2]), s: m[3] ? Number(m[3]) : 0 };
+  }
+
+  // order: "YMD" | "DMY" | "MDY"
+  function guessDateOrder(samples) {
+    let ymd = 0, firstBig = 0, secondBig = 0;
+    for (const s of samples) {
+      const p = splitDate(s);
+      if (!p) continue;
+      if (p.a.length === 4) { ymd++; continue; }
+      if (Number(p.a) > 12) firstBig++;
+      if (Number(p.b) > 12) secondBig++;
+    }
+    if (ymd) return { order: "YMD", sure: true };
+    if (firstBig && !secondBig) return { order: "DMY", sure: true };
+    if (secondBig && !firstBig) return { order: "MDY", sure: true };
+    return { order: "DMY", sure: false };
+  }
+
+  // Minutes since epoch, treating the wall-clock time as UTC (naive) unless an offset is given.
+  function toMinutes(p, order, time) {
+    let y, mo, d;
+    if (order === "YMD") { y = +p.a; mo = +p.b; d = +p.c; }
+    else if (order === "DMY") { d = +p.a; mo = +p.b; y = +p.c; }
+    else { mo = +p.a; d = +p.b; y = +p.c; }
+    if (y < 100) y += 2000;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    let h = p.h, mi = p.mi, s = p.s;
+    if (time) { h = time.h; mi = time.mi; s = time.s; }
+    const ms = Date.UTC(y, mo - 1, d, h, mi, s);
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCDate() !== d) return null; // e.g. 31.02.
+    return Math.round(ms / 60000) - (p.off != null ? p.off : 0);
+  }
+
+  function fmtStart(min) {
+    const d = new Date(min * 60000);
+    const z = (n) => String(n).padStart(2, "0");
+    return `${z(d.getUTCDate())}.${z(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())}`;
+  }
+
+  // ---------- table analysis ----------
+  // Find the header row (utility exports often start with account/address lines) and guess columns.
+  function analyze(text) {
+    text = String(text).replace(/^﻿/, "");
+    const delimiter = detectDelimiter(text);
+    const rows = splitRows(text, delimiter);
+    if (!rows.length) return { delimiter, rows: [], header: [], data: [], headerIndex: -1 };
+    const width = mode(rows.map((r) => r.length)).value;
+    let start = rows.findIndex((r) => r.length >= width && width > 1);
+    if (start < 0) start = 0;
+    const isData = (r) => r.some((f) => splitDate(f)) && r.some((f) => !isNaN(parseNumber(f, ".")) || !isNaN(parseNumber(f, ",")));
+    let headerIndex, data;
+    if (isData(rows[start])) {
+      headerIndex = -1;
+      data = rows.slice(start);
+    } else {
+      headerIndex = start;
+      data = rows.slice(start + 1);
+    }
+    data = data.filter((r) => r.length >= Math.min(width, 2));
+    const ncol = Math.max(width, ...(headerIndex >= 0 ? [rows[headerIndex].length] : [0]));
+    const header = [];
+    for (let i = 0; i < ncol; i++) header.push(headerIndex >= 0 && rows[headerIndex][i] ? rows[headerIndex][i] : "Column " + (i + 1));
+    const sample = data.slice(0, 200);
+    const frac = (i, fn) => sample.length ? sample.filter((r) => r[i] != null && r[i] !== "" && fn(r[i])).length / sample.length : 0;
+    const cols = header.map((name, i) => ({
+      name, index: i,
+      date: frac(i, (v) => !!splitDate(v)),
+      time: frac(i, (v) => !!parseTime(v)),
+      num: frac(i, (v) => !isNaN(parseNumber(v, guessDecimal([v])))),
+    }));
+    const dateCol = cols.filter((c) => c.date >= 0.5).sort((x, y) => y.date - x.date)[0];
+    let timeCol = null;
+    if (dateCol) {
+      const hasTime = sample.slice(0, 20).some((r) => { const p = splitDate(r[dateCol.index]); return p && p.hasTime; });
+      if (!hasTime) timeCol = cols.find((c) => c.index !== dateCol.index && c.time >= 0.5) || null;
+    }
+    const valueish = /kwh|wh\b|usage|consum|verbrauch|energ|import|value|wert|reading|z(ä|ae)hler|stand|amount|m3|m³/i;
+    const numCols = cols.filter((c) => c.num >= 0.5 && (!dateCol || c.index !== dateCol.index) && (!timeCol || c.index !== timeCol.index) && c.date < 0.5 && c.time < 0.5);
+    const valueCol = numCols.find((c) => valueish.test(c.name) && !/cost|price|eur|usd|\$|€|kosten|preis/i.test(c.name)) || numCols.find((c) => !/cost|price|kosten|preis/i.test(c.name)) || numCols[0] || null;
+    const looksReading = valueCol && /reading|z(ä|ae)hlerstand|stand|meter ?reading|total|index/i.test(valueCol.name);
+    const dateSamples = data.slice(0, 300).map((r) => dateCol ? r[dateCol.index] : "").filter(Boolean);
+    const dateOrder = guessDateOrder(dateSamples);
+    // Interval label: if the earliest time of the earliest day is one interval after midnight
+    // (00:15 for 15-minute data, 01:00 for hourly), the times mark interval ends.
+    let label = "start";
+    if (dateCol && !looksReading) {
+      const ts = [];
+      for (const r of data.slice(0, 2000)) {
+        const p = splitDate(r[dateCol.index]); if (!p) continue;
+        if (/\d\s*(-|–|to|bis)\s*\d/.test(r[dateCol.index])) { ts.length = 0; break; } // "13:15 - 13:30": start given
+        const t = timeCol ? parseTime(r[timeCol.index]) : null;
+        const m = toMinutes(p, dateOrder.order, t); if (m != null) ts.push(m);
+      }
+      if (ts.length > 2) {
+        ts.sort((a, b) => a - b);
+        const iv = mode(ts.slice(1).map((t, i) => t - ts[i]).filter((d) => d > 0)).value;
+        const first = ((ts[0] % 1440) + 1440) % 1440;
+        if (iv && iv <= 60 && first === iv) label = "end";
+      }
+    }
+    return {
+      label,
+      delimiter, header, headerIndex, data,
+      dateCol: dateCol ? dateCol.index : null,
+      timeCol: timeCol ? timeCol.index : null,
+      valueCol: valueCol ? valueCol.index : null,
+      valueType: looksReading ? "reading" : "interval",
+      decimal: guessDecimal(data.slice(0, 300).map((r) => valueCol ? r[valueCol.index] : "")),
+      dateOrder,
+    };
+  }
+
+  // ---------- conversion ----------
+  // opts: dateCol, timeCol (or null), valueCol, dateOrder, decimal, valueType ("interval"|"reading"),
+  // label ("start"|"end" of interval; interval data only), factor (unit multiplier, e.g. 0.001 for Wh->kWh)
+  function toHours(data, opts) {
+    const notes = [], problems = [];
+    const pts = [];
+    let withOffset = 0, naive = 0;
+    data.forEach((r, i) => {
+      const raw = r[opts.dateCol];
+      const p = splitDate(raw);
+      let t = null;
+      if (opts.timeCol != null) { t = parseTime(r[opts.timeCol]); if (!t) { problems.push({ row: i + 1, reason: `time "${r[opts.timeCol] || ""}" not understood` }); return; } }
+      if (!p) { problems.push({ row: i + 1, reason: `date "${raw || ""}" not understood` }); return; }
+      const m = toMinutes(p, opts.dateOrder, t);
+      if (m == null) { problems.push({ row: i + 1, reason: `date "${raw}" is not a valid ${opts.dateOrder} date` }); return; }
+      const v = parseNumber(r[opts.valueCol], opts.decimal);
+      if (!isFinite(v)) { problems.push({ row: i + 1, reason: `value "${r[opts.valueCol] || ""}" is not a number` }); return; }
+      if (p.off != null) withOffset++; else naive++;
+      pts.push({ t: m, v: v * (opts.factor || 1), row: i + 1 });
+    });
+    const utc = withOffset > 0 && naive === 0;
+    if (withOffset && naive) notes.push("Some timestamps have a time-zone offset and some don't; all were read as written. Check the result.");
+    pts.sort((a, b) => a.t - b.t);
+    // duplicates
+    const dedup = [];
+    let dupes = 0;
+    for (const p of pts) {
+      const last = dedup[dedup.length - 1];
+      if (last && last.t === p.t) { dupes++; if (opts.valueType === "interval") last.v += p.v; else last.v = p.v; }
+      else dedup.push({ t: p.t, v: p.v, row: p.row });
+    }
+    if (dupes) notes.push(opts.valueType === "interval"
+      ? `${dupes} timestamp(s) appear twice (often the repeated hour when clocks go back); their values were added together.`
+      : `${dupes} timestamp(s) appear twice; the later reading was used.`);
+    if (dedup.length < 2) return { hours: [], notes, problems, utc, interval: null, error: dedup.length ? "Need at least two rows with a date and a value." : "No rows with a readable date and value." };
+
+    const gaps = [];
+    for (let i = 1; i < dedup.length; i++) gaps.push(dedup[i].t - dedup[i - 1].t);
+    const interval = mode(gaps).value;
+    // build intervals [s, e) with energy
+    const iv = [];
+    let negatives = 0, resets = 0;
+    if (opts.valueType === "interval") {
+      if (interval > 60) return { hours: [], notes, problems, utc, interval, error: `Rows are ${describe(interval)} apart. Home Assistant stores hourly values, and daily or monthly totals can't be split into hours honestly. Use your provider's 15-minute, 30-minute or hourly export instead.` };
+      if (60 % interval !== 0) return { hours: [], notes, problems, utc, interval, error: `Rows are ${interval} minutes apart, which doesn't divide an hour evenly, so they can't be added up per hour.` };
+      for (const p of dedup) {
+        const s = opts.label === "end" ? p.t - interval : p.t;
+        if (p.v < 0) negatives++;
+        iv.push({ s, e: s + interval, v: p.v });
+      }
+    } else {
+      for (let i = 1; i < dedup.length; i++) {
+        let d = dedup[i].v - dedup[i - 1].v;
+        if (d < 0) { resets++; d = 0; }
+        iv.push({ s: dedup[i - 1].t, e: dedup[i].t, v: d });
+      }
+    }
+    if (negatives) notes.push(`${negatives} row(s) have negative values (for example solar export in net data). They were kept; Home Assistant energy counters normally only go up.`);
+    if (resets) notes.push(`The meter reading goes down ${resets} time(s) (meter replaced or reset?). Those steps were counted as 0.`);
+
+    // bucket by hour; an interval spanning several hours is booked in the hour it ends
+    const H = new Map();
+    let spanning = 0, spanningEnergy = 0;
+    for (const x of iv) {
+      const hs = Math.floor(x.s / 60) * 60, he = Math.floor((x.e - 1) / 60) * 60;
+      const key = hs === he ? hs : he;
+      if (hs !== he) { spanning++; spanningEnergy += x.v; }
+      const b = H.get(key) || { start: key, v: 0, covered: 0 };
+      b.v += x.v;
+      b.covered += hs === he ? x.e - x.s : 60;
+      H.set(key, b);
+    }
+    const hours = [...H.values()].sort((a, b) => a.start - b.start);
+    if (spanning) notes.push(`${spanning} gap(s) between rows span more than one hour. The ${round(spanningEnergy)} used across them can't be split by hour, so each is shown in the hour where its gap ends (it will look like a spike).`);
+    const partial = hours.filter((h) => h.covered < 60);
+    if (partial.length) notes.push(`${partial.length} hour(s) are only partly covered by your data (first: ${fmtStart(partial[0].start)}). Their totals only include the minutes present.`);
+    const missing = [];
+    for (let i = 1; i < hours.length; i++) {
+      const d = (hours[i].start - hours[i - 1].start) / 60 - 1;
+      if (d > 0) missing.push({ after: hours[i - 1].start, count: d });
+    }
+    if (missing.length) {
+      const n = missing.reduce((a, m) => a + m.count, 0);
+      notes.push(`${n} hour(s) have no data, in ${missing.length} gap(s) (first after ${fmtStart(missing[0].after)}).` + (missing.length === 1 && n === 1 && !utc ? " A single missing hour is usually the night clocks go forward." : ""));
+    }
+    return { hours, notes, problems, utc, interval, missing, error: null };
+  }
+
+  function describe(min) {
+    if (min % 1440 === 0) return (min / 1440) + " day(s)";
+    if (min % 60 === 0) return (min / 60) + " hours";
+    return min + " minutes";
+  }
+  function round(x) { return Math.round(x * 1e6) / 1e6; }
+  function num(x) { const r = round(x); return Object.is(r, -0) ? "0" : String(r); }
+
+  function validId(id) {
+    return /^[a-z0-9_]+[.:][a-z0-9_]+$/.test(id);
+  }
+
+  // out: { statisticId, unit, kind: "delta"|"sum", startSum, startState }
+  function serialize(hours, out) {
+    const lines = [];
+    if (out.kind === "delta") {
+      lines.push(["statistic_id", "start", "unit", "delta"].join("\t"));
+      for (const h of hours) lines.push([out.statisticId, fmtStart(h.start), out.unit, num(h.v)].join("\t"));
+    } else {
+      lines.push(["statistic_id", "start", "unit", "sum", "state"].join("\t"));
+      let sum = Number(out.startSum) || 0;
+      let state = out.startState != null && out.startState !== "" && isFinite(Number(out.startState)) ? Number(out.startState) : sum;
+      for (const h of hours) { sum += h.v; state += h.v; lines.push([out.statisticId, fmtStart(h.start), out.unit, num(sum), num(state)].join("\t")); }
+    }
+    return lines.join("\n") + "\n";
+  }
+
+  function yaml(filename, utc) {
+    return [
+      "action: import_statistics.import_from_file",
+      "data:",
+      `  filename: ${filename}`,
+      "  delimiter: \\t",
+      '  decimal: "."',
+      utc ? "  timezone_identifier: UTC" : "  # times are read in your Home Assistant time zone",
+    ].join("\n") + "\n";
+  }
+
+  const api = { splitRows, detectDelimiter, parseNumber, guessDecimal, splitDate, parseTime, guessDateOrder, toMinutes, fmtStart, analyze, toHours, serialize, yaml, validId, round };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.HAEnergy = api;
+})(typeof self !== "undefined" ? self : this);
+</script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const DEMO = [
+    "Meter point;DE0001234567890",
+    "Period;13.03.2024 - 13.03.2024",
+    "",
+    "Date;Time;Consumption (kWh)",
+    "13.03.2024;00:15;0,21", "13.03.2024;00:30;0,19", "13.03.2024;00:45;0,18", "13.03.2024;01:00;0,20",
+    "13.03.2024;01:15;0,17", "13.03.2024;01:30;0,16", "13.03.2024;01:45;0,18", "13.03.2024;02:00;0,17",
+    "13.03.2024;02:15;0,16", "13.03.2024;02:30;0,15", "13.03.2024;02:45;0,17", "13.03.2024;03:00;0,16",
+    "13.03.2024;03:15;0,31", "13.03.2024;03:30;0,42", "13.03.2024;03:45;0,38", "13.03.2024;04:00;0,29",
+  ].join("\n");
+  let A = null, result = null, fromDemo = false, file = "imported_energy.tsv";
+  function countExport(kind) {
+    if (fromDemo || !window.goatcounter || !window.goatcounter.count) return;
+    window.goatcounter.count({ path: "ha-energy-import/" + kind, title: "HA energy import " + kind, event: true });
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  const kind = () => document.querySelector("input[name=kind]:checked").value;
+  function fillSelect(sel, header, value, allowNone) {
+    sel.innerHTML = (allowNone ? '<option value="">(none: time is in the date column)</option>' : "") + header.map((h, i) => `<option value="${i}">${esc(h)}</option>`).join("");
+    sel.value = value == null ? "" : String(value);
+  }
+  function analyze() {
+    const text = $("input").value;
+    if (!text.trim()) { A = null; $("mapping").hidden = $("output").hidden = true; render(); return; }
+    A = HAEnergy.analyze(text);
+    fillSelect($("dateCol"), A.header, A.dateCol, false);
+    fillSelect($("timeCol"), A.header, A.timeCol, true);
+    fillSelect($("valueCol"), A.header, A.valueCol, false);
+    $("dateOrder").value = A.dateOrder.order;
+    $("decimal").value = A.decimal;
+    $("valueType").value = A.valueType;
+    $("label").value = A.label;
+    const vh = A.valueCol != null ? A.header[A.valueCol] : "";
+    $("unit").value = /\bwh\b/i.test(vh) && !/kwh/i.test(vh) ? "Wh" : /m3|m³/i.test(vh) ? "m³" : "kWh";
+    $("orderHint").textContent = A.dateOrder.sure ? "" : "The dates could be read either way (day-month or month-day). Check that the date format is right.";
+    $("mapping").hidden = $("output").hidden = false;
+    render();
+  }
+  function render() {
+    const thead = document.querySelector("#preview thead"), tbody = document.querySelector("#preview tbody");
+    result = null; $("yaml").hidden = true;
+    $("labelWrap").style.display = $("valueType").value === "interval" ? "block" : "none";
+    $("startWrap").style.display = kind() === "sum" ? "block" : "none";
+    $("kindHint").textContent = kind() === "sum"
+      ? "Creates a separate statistic you then pick in the Energy Dashboard. Safest choice."
+      : "Use the exact entity ID of your existing sensor (sensor.something). Only for hours before its first recorded value.";
+    if (!A) { thead.innerHTML = tbody.innerHTML = ""; $("summary").textContent = "Paste or open a CSV to see the result."; $("notes").innerHTML = ""; toggle(); return; }
+    const notes = [];
+    if (A.dateCol == null || $("dateCol").value === "") { $("summary").innerHTML = '<span class="error">No column with dates was found.</span>'; $("notes").innerHTML = ""; thead.innerHTML = tbody.innerHTML = ""; toggle(); return; }
+    const unit = $("unit").value;
+    const opts = {
+      dateCol: Number($("dateCol").value), timeCol: $("timeCol").value === "" ? null : Number($("timeCol").value),
+      valueCol: Number($("valueCol").value), dateOrder: $("dateOrder").value, decimal: $("decimal").value,
+      valueType: $("valueType").value, label: $("label").value, factor: unit === "Wh" ? 0.001 : 1,
+    };
+    const r = HAEnergy.toHours(A.data, opts);
+    const outUnit = unit === "Wh" ? "kWh" : unit;
+    const id = $("statId").value.trim();
+    if (!HAEnergy.validId(id)) notes.push('The statistic ID should look like "sensor:my_energy" (new) or "sensor.my_meter" (existing): lowercase letters, digits and _ only.');
+    r.problems.slice(0, 5).forEach((q) => notes.push(`Row ${q.row} was skipped: ${q.reason}.`));
+    if (r.problems.length > 5) notes.push(`${r.problems.length - 5} more rows were skipped.`);
+    if (r.error) {
+      $("summary").innerHTML = `<span class="error">${esc(r.error)}</span>`;
+      $("notes").innerHTML = notes.map((n) => `<div>• ${esc(n)}</div>`).join("");
+      thead.innerHTML = tbody.innerHTML = ""; toggle(); return;
+    }
+    notes.push(...r.notes);
+    if (kind() === "delta" && r.missing && r.missing.length) notes.push("Delta imports must not have missing hours inside the range Home Assistant already has data for. Consider \"New statistic\" instead.");
+    const total = r.hours.reduce((a, h) => a + h.v, 0);
+    const first = r.hours[0], last = r.hours[r.hours.length - 1];
+    $("summary").textContent = `${r.hours.length} hours from ${HAEnergy.fmtStart(first.start)} to ${HAEnergy.fmtStart(last.start)}${r.utc ? " UTC" : ""}, total ${HAEnergy.round(total)} ${outUnit}` + (r.interval ? ` (rows every ${r.interval} min).` : ".");
+    $("notes").innerHTML = notes.map((n) => `<div>• ${esc(n)}</div>`).join("");
+    const startState = opts.valueType === "reading" ? firstReading(opts) : null;
+    const out = { statisticId: id, unit: outUnit, kind: kind(), startSum: Number($("startSum").value) || 0, startState };
+    const tsv = HAEnergy.serialize(r.hours, out);
+    const lines = tsv.trim().split("\n").map((l) => l.split("\t"));
+    thead.innerHTML = "<tr>" + lines[0].map((h) => `<th>${esc(h)}</th>`).join("") + "</tr>";
+    const body = lines.slice(1);
+    const show = body.length > 48 ? body.slice(0, 24).concat([null], body.slice(-24)) : body;
+    tbody.innerHTML = show.map((row) => row ? "<tr>" + row.map((c) => `<td class="t">${esc(c)}</td>`).join("") + "</tr>" : `<tr><td colspan="${lines[0].length}" class="muted">… ${body.length - 48} more hours …</td></tr>`).join("");
+    file = (id.replace(/[^a-z0-9_]+/g, "_") || "imported_energy") + "_" + kind() + ".tsv";
+    result = { tsv, yaml: HAEnergy.yaml(file, r.utc), ok: HAEnergy.validId(id) };
+    $("yaml").textContent = result.yaml; $("yaml").hidden = false;
+    toggle();
+  }
+  function firstReading(opts) {
+    // the meter reading at the start of the first imported hour = earliest readable reading
+    let best = null;
+    for (const r of A.data) {
+      const p = HAEnergy.splitDate(r[opts.dateCol]); if (!p) continue;
+      const t = opts.timeCol != null ? HAEnergy.parseTime(r[opts.timeCol]) : null;
+      const m = HAEnergy.toMinutes(p, opts.dateOrder, t); const v = HAEnergy.parseNumber(r[opts.valueCol], opts.decimal);
+      if (m == null || !isFinite(v)) continue;
+      if (!best || m < best.m) best = { m, v: v * (opts.factor || 1) };
+    }
+    return best ? best.v : null;
+  }
+  function toggle() { $("download").disabled = $("copyYaml").disabled = !(result && result.ok); }
+  $("input").addEventListener("input", () => { fromDemo = false; analyze(); });
+  ["dateCol", "timeCol", "valueCol", "dateOrder", "decimal", "unit", "valueType", "label"].forEach((x) => $(x).addEventListener("change", render));
+  document.querySelectorAll("input[name=kind]").forEach((el) => el.addEventListener("change", render));
+  ["statId", "startSum"].forEach((x) => $(x).addEventListener("input", render));
+  $("demo").addEventListener("click", () => { $("input").value = DEMO; fromDemo = true; analyze(); });
+  $("file").addEventListener("change", (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const rd = new FileReader(); rd.onload = () => { $("input").value = rd.result; fromDemo = false; analyze(); }; rd.readAsText(f);
+  });
+  $("download").addEventListener("click", () => {
+    if (!result) return;
+    const blob = new Blob([result.tsv], { type: "text/tab-separated-values" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file;
+    countExport("download"); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("copyYaml").addEventListener("click", () => {
+    if (!result) return;
+    countExport("copy-yaml"); navigator.clipboard && navigator.clipboard.writeText(result.yaml);
+    $("copyYaml").textContent = "Copied"; setTimeout(() => { $("copyYaml").textContent = "Copy the action YAML"; }, 1500);
+  });
+  analyze();
+})();
+</script>
+</body>
+</html>
