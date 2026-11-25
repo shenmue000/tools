@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Observing list converter: SkySafari .skylist ↔ Stellarium ↔ CSV / Telescopius (free, in your browser)</title>
+<meta name="description" content="Convert astronomy observing lists between SkySafari (.skylist), Stellarium observing lists (.sol / .json) and CSV, including Telescopius exports. Keeps catalogue numbers, names and coordinates. Runs in your browser; nothing is uploaded.">
+<style>
+  :root { --ink:#1d2433; --muted:#5b6475; --line:#e3e6ec; --bg:#f7f8fa; --card:#fff; --accent:#1f6f5c; --warn:#b4541a; --err:#a8261d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.8rem; line-height:1.2; margin: 0 0 8px; }
+  h2 { font-size: 1.2rem; margin: 28px 0 10px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; }
+  textarea { width:100%; min-height:140px; font:13px/1.4 ui-monospace,Menlo,Consolas,monospace; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  label.opt { display:block; margin:6px 0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px 22px; }
+  .field { margin: 6px 0; }
+  .field > span { display:block; font-size:.9rem; color:var(--muted); }
+  select, input[type=text], input[type=number] { font:inherit; padding:5px 7px; border:1px solid var(--line); border-radius:6px; width:100%; max-width:320px; background:#fff; }
+  .btn { display:inline-block; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.secondary { background:#e8efed; color:var(--accent); }
+  .btn:disabled { opacity:.45; cursor:default; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { text-align:left; padding:4px 8px; border-top:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.t { font-family: ui-monospace,Menlo,Consolas,monospace; white-space: nowrap; }
+  .notes { color:var(--warn); font-size:.95rem; }
+  .error { color:var(--err); font-weight:600; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  pre { background:#f1f3f6; border-radius:8px; padding:10px; overflow-x:auto; font-size:.88rem; }
+  ol li { margin: 4px 0; }
+  footer { color:var(--muted); font-size:.9rem; margin-top:40px; }
+</style>
+<!-- GoatCounter: cookie-less, no personal data -->
+<script data-goatcounter="https://smalltools.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</head>
+<body>
+<main>
+  <h1>Observing list converter: SkySafari ↔ Stellarium ↔ CSV</h1>
+  <p class="lead">Move an observing list between <b>SkySafari</b> (.skylist), <b>Stellarium</b>'s observing lists (.sol or .json) and a spreadsheet (CSV), including lists exported from <b>Telescopius</b>. Stellarium has no import for SkySafari lists, and SkySafari has none for CSV; this page does the conversion in your browser, with nothing uploaded.</p>
+
+  <div class="card">
+    <strong>1. Your list</strong>
+    <p class="muted">A .skylist from SkySafari, a .sol / .json exported from Stellarium's Observing lists window, a Telescopius CSV export, or any CSV with a "Name" column (M 31, NGC 7000, C 14, HIP 677, Jupiter…), optionally with RA and Dec columns.</p>
+    <p><input type="file" id="file" accept=".skylist,.sol,.ol,.json,.csv,.txt"> <button class="btn secondary" id="demo" type="button">Try an example</button></p>
+    <textarea id="input" spellcheck="false" placeholder="Or paste a list here, e.g.&#10;Name&#10;M 31&#10;NGC 7000&#10;Caldwell 14"></textarea>
+  </div>
+
+  <div class="card" id="options" hidden>
+    <strong>2. Options</strong>
+    <div class="grid">
+      <label class="field"><span>List name</span><input type="text" id="listName" value="Observing list"></label>
+      <label class="field" id="whichWrap"><span>Which Stellarium list</span><select id="which"></select></label>
+    </div>
+    <label class="opt"><input type="checkbox" id="dedupe" checked> Remove objects listed twice</label>
+  </div>
+
+  <h2>Preview</h2>
+  <div id="summary" class="muted">Open or paste a list to see the result.</div>
+  <div id="notes" class="notes"></div>
+  <div class="card" style="overflow-x:auto"><table id="preview"><thead><tr><th>#</th><th>Object</th><th>Name / other designations</th><th>Kind</th><th>RA (J2000)</th><th>Dec (J2000)</th></tr></thead><tbody></tbody></table></div>
+  <p><button class="btn" id="dlSky" type="button" disabled>SkySafari (.skylist)</button>
+     <button class="btn" id="dlStel" type="button" disabled>Stellarium (.sol)</button>
+     <button class="btn secondary" id="dlCsv" type="button" disabled>CSV</button></p>
+
+  <h2>How to open the result</h2>
+  <ul>
+    <li><b>Stellarium</b> (version 1.0 or newer): open the <b>Observing lists</b> window, click <b>Import</b> and pick the .sol file. It is added as a new list; Stellarium finds each object by its catalogue number.</li>
+    <li><b>SkySafari</b>: open the .skylist file with SkySafari (for example from the Files app, AirDrop or an email attachment, or the import option in its observing lists). SkySafari looks each object up by catalogue number or name.</li>
+    <li><b>CSV</b>: opens in Excel, Numbers or Google Sheets, and many imaging and planning programs can read it.</li>
+  </ul>
+
+  <h2>Questions</h2>
+  <p><b>Why are RA and Dec empty for some objects?</b> A SkySafari list stores only catalogue numbers and names, not positions. This page doesn't guess coordinates; Stellarium and SkySafari look the objects up themselves. Coordinates from a Telescopius export or a Stellarium list are kept.</p>
+  <p><b>Which names work?</b> Catalogue numbers are the safest: M, NGC, IC, Caldwell (C), HIP, HD, HR, SAO, Melotte, Collinder and similar. Planets go by their English name. Bright stars like "Alpha CMa" are written as SkySafari expects. For stars from SkySafari lists the HIP number is used, because Stellarium finds those reliably.</p>
+  <p><b>An object didn't show up after importing?</b> Each program has its own catalogues, so a rare object one knows may be missing in the other. Stellarium keeps such rows and uses the coordinates if the file has them.</p>
+  <p><b>Is my list sent anywhere?</b> No. The file is read and converted in your browser. Only an anonymous page-visit count is recorded (no cookies, no personal data).</p>
+  <p><b>Not affiliated</b> with SkySafari, Simulation Curriculum, Stellarium or Telescopius.</p>
+  <footer>A small free tool. <a href="../">More free tools</a></footer>
+</main>
+<script>
+// Observing lists: SkySafari .skylist <-> Stellarium observing list (.sol / .json) <-> CSV (incl. Telescopius export).
+// Browser + Node. No network, no dependencies, no star catalogue: objects are passed by designation,
+// coordinates are kept when the input has them.
+(function (root) {
+  "use strict";
+
+  // ---------- CSV (tolerant: Telescopius writes "" for arcseconds inside unquoted fields) ----------
+  function splitRows(text, delim) {
+    const rows = [];
+    let row = [], field = "", q = false, quotedField = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else q = false;
+        } else field += c;
+      } else if (c === '"' && field === "" && !quotedField) { q = true; quotedField = true; }
+      else if (c === delim) { row.push(field); field = ""; quotedField = false; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = ""; quotedField = false;
+        if (row.some((f) => f.trim() !== "")) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+    row.push(field);
+    if (row.some((f) => f.trim() !== "")) rows.push(row);
+    return rows.map((r) => r.map((f) => f.trim()));
+  }
+  function detectDelimiter(line) {
+    const counts = [",", ";", "\t"].map((d) => [d, line.split(d).length]);
+    counts.sort((a, b) => b[1] - a[1]);
+    return counts[0][1] > 1 ? counts[0][0] : ",";
+  }
+  const stripBom = (s) => String(s).replace(/^﻿/, "");
+
+  // ---------- designations ----------
+  const PLANETS = ["Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto"];
+  const GREEK = { alpha: "a", beta: "b", gamma: "g", delta: "d", epsilon: "e", zeta: "z", eta: "h", theta: "q", iota: "i", kappa: "k", lambda: "l", mu: "m", nu: "n", xi: "x", omicron: "o", pi: "p", rho: "r", sigma: "s", tau: "t", upsilon: "u", phi: "f", chi: "c", psi: "y", omega: "w" };
+  const GREEK_BACK = Object.fromEntries(Object.entries(GREEK).map(([k, v]) => [v, k[0].toUpperCase() + k.slice(1)]));
+  // "M31" -> "M 31", "NGC224" -> "NGC 224", "Sh2-155" kept, "Caldwell 12" -> "C 12"
+  function normDesignation(s) {
+    let t = String(s || "").replace(/\s+/g, " ").trim();
+    if (!t) return "";
+    t = t.replace(/^caldwell\s*(\d+)$/i, "C $1").replace(/^messier\s*(\d+)$/i, "M $1");
+    const m = /^(M|NGC|IC|C|HIP|HD|HR|SAO|UGC|PGC|Mel|Cr|Tr|Abell|Arp|Barnard|B|LDN|vdB|Stock|Berkeley|Be|Pal|PK|PN)\s*-?\s*(\d+[A-Za-z]?)$/i.exec(t);
+    if (m) {
+      const cat = m[1].length <= 3 ? m[1].toUpperCase().replace("MEL", "Mel") : m[1][0].toUpperCase() + m[1].slice(1);
+      const fixed = { CR: "Cr", TR: "Tr", BE: "Be", PAL: "Pal", VDB: "vdB" }[cat.toUpperCase()] || cat;
+      return fixed + " " + m[2].replace(/^0+(?=\d)/, "");
+    }
+    return t;
+  }
+  // Bayer star names: SkySafari writes "$a And"; Stellarium/people write "Alpha And" / "α And"
+  const GREEK_LETTERS = "αβγδεζηθικλμνξοπρστυφχψω".split("");
+  const GREEK_NAMES = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega"];
+  function skySafariToReadable(s) { // "$a And" -> "Alpha And", "$q1 Eri" -> "Theta1 Eri"
+    return String(s).replace(/^\$([a-z])(\d*)\s/, (m, l, n) => (GREEK_BACK[l] || m) + n + " ");
+  }
+  function readableToSkySafari(s) { // "Alpha And" / "α And" -> "$a And"
+    let t = String(s);
+    const gi = GREEK_LETTERS.indexOf(t[0]);
+    if (gi >= 0) t = GREEK_NAMES[gi] + t.slice(1);
+    return t.replace(/^([A-Za-z]+)(\d*)\s+([A-Z][A-Za-z]{2})$/, (m, g, n, con) => (GREEK[g.toLowerCase()] ? "$" + GREEK[g.toLowerCase()] + n + " " + con : m));
+  }
+  function kindOf(designation, typeHint) {
+    const d = String(designation || ""), h = String(typeHint || "").toLowerCase();
+    if (PLANETS.some((p) => p.toLowerCase() === d.toLowerCase()) || /planet|moon|comet|asteroid|minor/.test(h)) return "planet";
+    if (/^(HIP|HD|HR|SAO|TYC|Gaia|BD|GJ|WDS|STF|Struve)\b/i.test(d) || /^\$[a-z]/.test(d) || /^(Alpha|Beta|Gamma|Delta|Epsilon|Zeta|Eta|Theta)\d*\s/i.test(d) || /\bstar\b|double|variable|binary|carbon/.test(h)) return "star";
+    return "dso";
+  }
+  const OBJECT_ID = { planet: "1,-1,-1", star: "2,-1,-1", dso: "4,-1,-1" };
+  const STEL_TYPE = { planet: "Planet", star: "Star", dso: "Nebula" };
+
+  // ---------- coordinates ----------
+  // returns degrees or NaN. RA: "00h 42m 44.3s", "0:42:44.3", "10.6847" (degrees if > 24 or with flag)
+  function parseRA(s) {
+    const t = String(s || "").replace(/""/g, '"').trim(); if (!t) return NaN;
+    let m = /^(\d{1,2})\s*[h: ]\s*(\d{1,2})\s*[m:' ]\s*(\d{1,2}(?:\.\d+)?)\s*s?$/i.exec(t);
+    if (m) return (+m[1] + +m[2] / 60 + +m[3] / 3600) * 15;
+    m = /^(\d{1,2})\s*[h: ]\s*(\d{1,2}(?:\.\d+)?)\s*m?$/i.exec(t);
+    if (m) return (+m[1] + +m[2] / 60) * 15;
+    m = /^(\d+(?:\.\d+)?)\s*(h|°|deg)?$/i.exec(t);
+    if (m) return m[2] && m[2].toLowerCase() === "h" ? +m[1] * 15 : +m[1];
+    return NaN;
+  }
+  function parseDec(s) {
+    const t = String(s || "").replace(/""/g, '"').replace(/[º˚]/g, "°").replace(/[′’]/g, "'").replace(/[″”]/g, '"').trim(); if (!t) return NaN;
+    let m = /^([+\-−]?)\s*(\d{1,2})\s*[°d: ]\s*(\d{1,2})\s*['m: ]\s*(\d{1,2}(?:\.\d+)?)\s*["s]?$/i.exec(t);
+    let v;
+    if (m) v = +m[2] + +m[3] / 60 + +m[4] / 3600;
+    else if ((m = /^([+\-−]?)\s*(\d{1,2})\s*[°d: ]\s*(\d{1,2}(?:\.\d+)?)\s*['m]?$/i.exec(t))) v = +m[2] + +m[3] / 60;
+    else if ((m = /^([+\-−]?)\s*(\d+(?:\.\d+)?)\s*°?$/.exec(t))) v = +m[2];
+    else return NaN;
+    if (v > 90) return NaN;
+    return m[1] === "-" || m[1] === "−" ? -v : v;
+  }
+  function fmtRA(deg, style) { // style "stel": 0h42m44.3s ; "csv": 00h 42m 44.3s
+    let s = ((deg / 15) % 24 + 24) % 24 * 3600;
+    s = Math.round(s * 10) / 10; if (s >= 86400) s -= 86400;
+    const h = Math.floor(s / 3600), mi = Math.floor((s % 3600) / 60), sec = (s % 60).toFixed(1).padStart(4, "0");
+    return style === "stel" ? `${h}h${String(mi).padStart(2, "0")}m${sec}s` : `${String(h).padStart(2, "0")}h ${String(mi).padStart(2, "0")}m ${sec}s`;
+  }
+  function fmtDec(deg, style) {
+    const sign = deg < 0 ? "-" : "+";
+    let s = Math.round(Math.abs(deg) * 3600);
+    const d = Math.floor(s / 3600), mi = Math.floor((s % 3600) / 60), sec = s % 60;
+    const p = (n) => String(n).padStart(2, "0");
+    return style === "stel" ? `${sign}${d}°${p(mi)}'${p(sec)}"` : `${sign}${p(d)}° ${p(mi)}' ${p(sec)}"`;
+  }
+
+  // ---------- readers -> { name, items:[{designation, alt:[], common, kind, ra, dec, mag, notes}], skipped:[], kind } ----------
+  function readSkylist(text) {
+    const out = { kind: "SkySafari list", items: [], skipped: [] };
+    const lines = stripBom(text).split(/\r\n|\r|\n/).map((l) => l.trim());
+    if (!/^SkySafariObservingListVersion=/i.test(lines[0] || "")) { out.error = "This doesn't look like a SkySafari .skylist file (the first line should be SkySafariObservingListVersion=…)."; return out; }
+    let cur = null, n = 0;
+    for (const l of lines) {
+      if (/^SkyObject=BeginObject/i.test(l)) { cur = { cats: [], commons: [], id: "", comment: "" }; continue; }
+      if (/^EndObject=SkyObject/i.test(l)) {
+        n++;
+        if (cur) {
+          const cls = /^(\d+),/.exec(cur.id); const kind = cls ? { 1: "planet", 2: "star", 3: "star", 4: "dso" }[cls[1]] || null : null;
+          const cats = cur.cats.map((c) => (/^\$/.test(c) ? skySafariToReadable(c) : c));
+          // for stars prefer the HIP number (Stellarium resolves it); keep the rest as alternatives
+          let primary = cats.find((c) => /^HIP /.test(c)) || cats[0] || cur.commons[0] || "";
+          if (!primary) out.skipped.push({ where: "object " + n, reason: "no catalogue number or name" });
+          else out.items.push({ designation: primary, alt: cats.filter((c) => c !== primary), common: cur.commons.find((c) => c !== primary) || "", kind: kind || kindOf(primary), notes: cur.comment, ra: NaN, dec: NaN, rawCats: cur.cats });
+        }
+        cur = null; continue;
+      }
+      if (!cur) continue;
+      const kv = /^([A-Za-z]+)=(.*)$/.exec(l); if (!kv) continue;
+      if (kv[1] === "CatalogNumber" && kv[2].trim()) cur.cats.push(kv[2].trim());
+      else if (kv[1] === "CommonName" && kv[2].trim()) cur.commons.push(kv[2].trim());
+      else if (kv[1] === "ObjectID") cur.id = kv[2].trim();
+      else if (kv[1] === "Comment") cur.comment = kv[2].trim();
+    }
+    return out;
+  }
+  function readStellarium(text) {
+    const out = { kind: "Stellarium list", items: [], skipped: [], lists: [] };
+    let data; try { data = JSON.parse(stripBom(text)); } catch (e) { out.error = "This file isn't valid JSON."; return out; }
+    const map = data && (data.observingLists || data.bookmarks);
+    if (!map || typeof map !== "object") { out.error = "No observing lists found (expected an \"observingLists\" section, as Stellarium exports)."; return out; }
+    if (data.bookmarks && !data.observingLists) {
+      // legacy bookmarks: {uuid: {name, nameI18n, ra, dec, ...}} = one list
+      Object.values(map).forEach((o, i) => addStel(out, o, o.name || o.designation, i));
+      out.lists.push({ name: "Bookmarks", count: out.items.length });
+      return out;
+    }
+    for (const [id, list] of Object.entries(map)) {
+      const start = out.items.length;
+      (Array.isArray(list && list.objects) ? list.objects : []).forEach((o, i) => addStel(out, o, o && o.designation, i, list.name));
+      out.lists.push({ id, name: (list && list.name) || "Observing list", count: out.items.length - start });
+    }
+    if (out.lists.length === 1) out.name = out.lists[0].name;
+    return out;
+  }
+  function addStel(out, o, designation, i, listName) {
+    if (!o || !designation) { out.skipped.push({ where: (listName ? listName + ", " : "") + "object " + (i + 1), reason: "no designation" }); return; }
+    const d = normDesignation(designation);
+    out.items.push({ designation: d, alt: [], common: o.nameI18n && o.nameI18n !== d ? o.nameI18n : "", kind: kindOf(d, o.type), ra: parseRA(o.ra), dec: parseDec(o.dec), mag: o.magnitude || "", list: listName || "" });
+  }
+  // CSV: Telescopius export or any table with a name/designation column (+ optional RA/Dec)
+  function readCsv(text) {
+    const out = { kind: "CSV", items: [], skipped: [] };
+    const t = stripBom(text); const first = t.split(/\r\n|\r|\n/)[0] || "";
+    const rows = splitRows(t, detectDelimiter(first));
+    if (rows.length < 2) { out.error = "The CSV needs a header row and at least one object."; return out; }
+    const head = rows[0].map((h) => h.toLowerCase());
+    const find = (...res) => { for (const re of res) { const i = head.findIndex((h) => re.test(h)); if (i >= 0) return i; } return -1; };
+    const c = {
+      des: find(/^catalogue entry$/, /designation|catalog(ue)? ?(number|entry|id)|^object$|^id$|^name$|^target/, /name/),
+      common: find(/familiar name|common name/),
+      alt: find(/alternative entries|other names|aliases/),
+      type: find(/^type$|object type/),
+      ra: find(/^right ascension \(j2000\)$|^right ascension$|^ra( ?\(j2000\))?$|^ra[ _]?(j2000|deg|hms)?$/),
+      dec: find(/^declination \(j2000\)$|^declination$|^dec( ?\(j2000\))?$|^dec[ _]?(j2000|deg|dms)?$/),
+      mag: find(/^magnitude$|^mag/),
+    };
+    if (c.des < 0) { out.error = "No column with object names was found. Name a column \"Name\" or \"Designation\" (for example M 31, NGC 7000, HIP 677)."; return out; }
+    if (head[c.des] === "catalogue entry") out.kind = "Telescopius CSV";
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i], g = (k) => (c[k] >= 0 && r[c[k]] != null ? r[c[k]] : "");
+      const d = normDesignation(g("des"));
+      if (!d) { out.skipped.push({ where: "row " + (i + 1), reason: "no object name" }); continue; }
+      const alt = g("alt") ? g("alt").split(/\s*[,;|]\s*/).map(normDesignation).filter((x) => x && x !== d) : [];
+      out.items.push({ designation: d, alt, common: g("common"), kind: kindOf(d, g("type")), ra: parseRA(g("ra")), dec: parseDec(g("dec")), mag: g("mag") });
+    }
+    return out;
+  }
+  function detect(name, text) {
+    const t = stripBom(String(text || "")).trimStart(), n = String(name || "").toLowerCase();
+    if (/^SkySafariObservingListVersion=/i.test(t) || n.endsWith(".skylist")) return "skylist";
+    if (t.startsWith("{") || n.endsWith(".sol") || n.endsWith(".ol") || n.endsWith(".json")) return "stellarium";
+    return "csv";
+  }
+  function read(name, text) {
+    const k = detect(name, text);
+    return k === "skylist" ? readSkylist(text) : k === "stellarium" ? readStellarium(text) : readCsv(text);
+  }
+
+  // ---------- writers ----------
+  function toSkylist(items) {
+    const L = ["SkySafariObservingListVersion=3.0", "SortedBy=Default Order"];
+    items.forEach((it, i) => {
+      L.push("SkyObject=BeginObject", "\tObjectID=" + OBJECT_ID[it.kind]);
+      if (it.kind === "planet" && !/\d/.test(it.designation)) L.push("\tCommonName=" + ascii(it.designation));
+      else {
+        const main = it.kind === "star" ? readableToSkySafari(it.designation) : it.designation;
+        // only the catalogue number: SkySafari rejects an object unless every name given matches its own database
+        L.push("\tCatalogNumber=" + ascii(main));
+      }
+      L.push("\tDefaultIndex=" + i, "EndObject=SkyObject");
+    });
+    return L.join("\n") + "\n";
+  }
+  const ascii = (s) => String(s).normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7e]/g, "").trim();
+  function stamp(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+  function toStellarium(items, listName, opts) {
+    opts = opts || {};
+    const id = "{" + (opts.uuid ? opts.uuid() : (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : rnd())) + "}";
+    const now = stamp(opts.now || new Date());
+    const objects = items.map((it) => {
+      const o = { designation: it.designation, type: STEL_TYPE[it.kind] };
+      if (it.common && it.common !== it.designation) o.nameI18n = it.common;
+      if (isFinite(it.ra) && isFinite(it.dec)) { o.ra = fmtRA(it.ra, "stel"); o.dec = fmtDec(it.dec, "stel"); }
+      if (it.mag) o.magnitude = String(it.mag);
+      return o;
+    });
+    const list = { name: listName || "Observing list", description: opts.description || "", sorting: "", "creation date": now, "last edit": now, objects };
+    return JSON.stringify({ defaultListOlud: "", observingLists: { [id]: list }, shortName: "Observing list for Stellarium", version: "2.1" }, null, 4) + "\n";
+  }
+  function rnd() { return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3) | 8).toString(16); }); }
+  function csvCell(s) { s = String(s == null ? "" : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  function toCsv(items) {
+    const L = ["Designation,Common name,Other designations,Kind,RA (J2000),Dec (J2000),Magnitude"];
+    for (const it of items) L.push([it.designation, it.common, (it.alt || []).join("; "), { planet: "solar system", star: "star", dso: "deep sky" }[it.kind], isFinite(it.ra) ? fmtRA(it.ra, "csv") : "", isFinite(it.dec) ? fmtDec(it.dec, "csv") : "", it.mag || ""].map(csvCell).join(","));
+    return L.join("\n") + "\n";
+  }
+  function dedupe(items) {
+    const seen = new Set(), out = [], dups = [];
+    for (const it of items) { const k = it.designation.toLowerCase(); if (seen.has(k)) dups.push(it.designation); else { seen.add(k); out.push(it); } }
+    return { items: out, dups };
+  }
+
+  const api = { splitRows, normDesignation, skySafariToReadable, readableToSkySafari, kindOf, parseRA, parseDec, fmtRA, fmtDec, readSkylist, readStellarium, readCsv, detect, read, toSkylist, toStellarium, toCsv, dedupe };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.ObsList = api;
+})(typeof self !== "undefined" ? self : this);
+</script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const DEMO = ["SkySafariObservingListVersion=3.0", "SortedBy=Default Order",
+    "SkyObject=BeginObject", "\tObjectID=4,-1,-1", "\tCatalogNumber=M 31", "\tCommonName=Andromeda Galaxy", "EndObject=SkyObject",
+    "SkyObject=BeginObject", "\tObjectID=4,-1,-1", "\tCatalogNumber=M 45", "EndObject=SkyObject",
+    "SkyObject=BeginObject", "\tObjectID=4,-1,-1", "\tCatalogNumber=NGC 869", "\tCatalogNumber=C 14", "EndObject=SkyObject",
+    "SkyObject=BeginObject", "\tObjectID=2,-1,-1", "\tCommonName=Albireo", "\tCatalogNumber=$b1 Cyg", "\tCatalogNumber=HIP 95947", "EndObject=SkyObject",
+    "SkyObject=BeginObject", "\tObjectID=1,-1,-1", "\tCommonName=Saturn", "EndObject=SkyObject", ""].join("\n");
+  let parsed = null, current = [], fromDemo = false, fileName = "";
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function countExport(kind) {
+    if (fromDemo || !window.goatcounter || !window.goatcounter.count) return;
+    window.goatcounter.count({ path: "observing-list/" + kind, title: "Observing list " + kind, event: true });
+  }
+  function analyze() {
+    const text = $("input").value;
+    if (!text.trim()) { parsed = null; $("options").hidden = true; render(); return; }
+    parsed = ObsList.read(fileName, text);
+    const lists = parsed.lists || [];
+    $("whichWrap").style.display = lists.length > 1 ? "block" : "none";
+    $("which").innerHTML = '<option value="">All lists combined</option>' + lists.map((l, i) => `<option value="${i}">${esc(l.name)} (${l.count})</option>`).join("");
+    const base = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+    $("listName").value = parsed.name || base || "Observing list";
+    $("options").hidden = !!parsed.error;
+    render();
+  }
+  function selected() {
+    let items = parsed.items;
+    const w = $("which").value;
+    if (parsed.lists && parsed.lists.length > 1 && w !== "") items = items.filter((it) => it.list === parsed.lists[+w].name);
+    return items;
+  }
+  function render() {
+    const tbody = document.querySelector("#preview tbody");
+    tbody.innerHTML = ""; $("notes").innerHTML = ""; current = [];
+    ["dlSky", "dlStel", "dlCsv"].forEach((x) => ($(x).disabled = true));
+    if (!parsed) { $("summary").textContent = "Open or paste a list to see the result."; return; }
+    if (parsed.error) { $("summary").innerHTML = `<span class="error">${esc(parsed.error)}</span>`; return; }
+    const notes = [];
+    let items = selected();
+    if ($("dedupe").checked) { const d = ObsList.dedupe(items); items = d.items; if (d.dups.length) notes.push(`Removed ${d.dups.length} duplicate${d.dups.length === 1 ? "" : "s"}: ${d.dups.slice(0, 5).join(", ")}${d.dups.length > 5 ? "…" : ""}.`); }
+    parsed.skipped.slice(0, 5).forEach((s) => notes.push(`Skipped ${s.where}: ${s.reason}.`));
+    if (parsed.skipped.length > 5) notes.push(`${parsed.skipped.length - 5} more items were skipped.`);
+    const noPos = items.filter((it) => !(isFinite(it.ra) && isFinite(it.dec)) && it.kind !== "planet").length;
+    if (noPos && noPos === items.filter((it) => it.kind !== "planet").length) notes.push("The input has no coordinates, so the output lists objects by name only (both programs look them up).");
+    else if (noPos) notes.push(`${noPos} object${noPos === 1 ? " has" : "s have"} no coordinates; ${noPos === 1 ? "it is" : "they are"} listed by name only.`);
+    if (!items.length) { $("summary").innerHTML = '<span class="error">No objects could be read.</span>'; $("notes").innerHTML = notes.map((n) => `<div>• ${esc(n)}</div>`).join(""); return; }
+    current = items;
+    $("summary").textContent = `${items.length} object${items.length === 1 ? "" : "s"} read from a ${parsed.kind}.`;
+    $("notes").innerHTML = notes.map((n) => `<div>• ${esc(n)}</div>`).join("");
+    const kinds = { planet: "solar system", star: "star", dso: "deep sky" };
+    const show = items.length > 60 ? items.slice(0, 60) : items;
+    tbody.innerHTML = show.map((it, i) => `<tr><td>${i + 1}</td><td class="t">${esc(it.designation)}</td><td>${esc([it.common].concat(it.alt || []).filter(Boolean).join(" · "))}</td><td>${kinds[it.kind]}</td><td class="t">${isFinite(it.ra) ? ObsList.fmtRA(it.ra, "csv") : ""}</td><td class="t">${isFinite(it.dec) ? ObsList.fmtDec(it.dec, "csv") : ""}</td></tr>`).join("") +
+      (items.length > 60 ? `<tr><td colspan="6" class="muted">… ${items.length - 60} more objects …</td></tr>` : "");
+    ["dlSky", "dlStel", "dlCsv"].forEach((x) => ($(x).disabled = false));
+  }
+  function name() { return ($("listName").value.trim() || "Observing list").replace(/[\\/:*?"<>|]+/g, " ").trim(); }
+  function save(text, ext, type, kind) {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name() + ext;
+    countExport(kind); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  $("dlSky").addEventListener("click", () => current.length && save(ObsList.toSkylist(current), ".skylist", "text/plain", "skylist"));
+  $("dlStel").addEventListener("click", () => current.length && save(ObsList.toStellarium(current, $("listName").value.trim() || "Observing list"), ".sol", "application/json", "stellarium"));
+  $("dlCsv").addEventListener("click", () => current.length && save(ObsList.toCsv(current), ".csv", "text/csv", "csv"));
+  $("input").addEventListener("input", () => { fromDemo = false; fileName = ""; analyze(); });
+  ["which", "dedupe"].forEach((x) => $(x).addEventListener("change", render));
+  $("demo").addEventListener("click", () => { $("input").value = DEMO; fileName = "Autumn favourites.skylist"; fromDemo = true; analyze(); });
+  $("file").addEventListener("change", (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    f.text().then((t) => { $("input").value = t; fileName = f.name; fromDemo = false; analyze(); });
+  });
+  analyze();
+})();
+</script>
+</body>
+</html>
