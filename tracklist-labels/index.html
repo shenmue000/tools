@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track list to Audacity labels: split an album or mix into named tracks (free, in your browser)</title>
+<meta name="description" content="Turn a pasted track list (YouTube timestamps, Discogs track lengths, a .cue sheet, or just the names) into an Audacity label file, then split the recording into named tracks with Export Multiple. Runs in your browser; nothing is uploaded.">
+<style>
+  :root { --ink:#1d2433; --muted:#5b6475; --line:#e3e6ec; --bg:#f7f8fa; --card:#fff; --accent:#1f6f5c; --warn:#b4541a; --err:#a8261d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.8rem; line-height:1.2; margin: 0 0 8px; }
+  h2 { font-size: 1.2rem; margin: 28px 0 10px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; }
+  textarea { width:100%; min-height:140px; font:13px/1.4 ui-monospace,Menlo,Consolas,monospace; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  label.opt { display:block; margin:6px 0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px 22px; }
+  .field { margin: 6px 0; }
+  .field > span { display:block; font-size:.9rem; color:var(--muted); }
+  select, input[type=text], input[type=number] { font:inherit; padding:5px 7px; border:1px solid var(--line); border-radius:6px; width:100%; max-width:320px; background:#fff; }
+  .btn { display:inline-block; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.secondary { background:#e8efed; color:var(--accent); }
+  .btn:disabled { opacity:.45; cursor:default; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { text-align:left; padding:4px 8px; border-top:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  td.t { font-family: ui-monospace,Menlo,Consolas,monospace; white-space: nowrap; }
+  .notes { color:var(--warn); font-size:.95rem; }
+  .error { color:var(--err); font-weight:600; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  pre { background:#f1f3f6; border-radius:8px; padding:10px; overflow-x:auto; font-size:.88rem; }
+  ol li { margin: 4px 0; }
+  footer { color:var(--muted); font-size:.9rem; margin-top:40px; }
+</style>
+<!-- GoatCounter: cookie-less, no personal data -->
+<script data-goatcounter="https://smalltools.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</head>
+<body>
+<main>
+  <h1>Track list → Audacity labels</h1>
+  <p class="lead">Recorded a whole album, a vinyl side, a DJ set or a long concert as one file? Paste its track list here: <b>timestamps</b> from a YouTube description, <b>track lengths</b> copied from Discogs, a <b>.cue</b> sheet, or <b>just the names</b>. You get a label file for Audacity, which can then split the recording into one named file per track. Everything runs in your browser; nothing is uploaded.</p>
+
+  <div class="card">
+    <strong>1. Track list</strong>
+    <p class="muted">One track per line, e.g. <code>0:00 Intro</code> or <code>A1&nbsp;&nbsp;Song Title&nbsp;&nbsp;3:25</code>. Lines without a time (like “Tracklist:” or “Thanks for listening”) are skipped and listed below. You can also open a .cue or .txt file.</p>
+    <p><input type="file" id="file" accept=".cue,.txt,.csv,.tsv,.md"> <button class="btn secondary" id="demoYt" type="button">Example: timestamps</button> <button class="btn secondary" id="demoDg" type="button">Example: Discogs lengths</button></p>
+    <textarea id="input" spellcheck="false" placeholder="0:00 Intro&#10;3:25 Second Song&#10;7:40 Third Song"></textarea>
+  </div>
+
+  <details class="card" id="namesCard">
+    <summary><strong>Only have names, no times?</strong> Use labels Audacity found for you</summary>
+    <ol>
+      <li>In Audacity, select the recording and run <b>Analyze → Label Sounds…</b>. It puts a label on each stretch of sound between silences.</li>
+      <li>Check that there is one label per track, then <b>File → Export → Export Labels…</b>.</li>
+      <li>Paste the track names in box 1 above, and open or paste that label file here. Names are applied in order.</li>
+    </ol>
+    <p><input type="file" id="labelsFile" accept=".txt,.tsv"></p>
+    <textarea id="labelsInput" spellcheck="false" placeholder="Existing labels (start, end, text), e.g.&#10;1.000000&#9;180.500000&#9;S1"></textarea>
+  </details>
+
+  <div class="card" id="options" hidden>
+    <strong>2. Options</strong>
+    <div class="grid">
+      <label class="field" id="meaningWrap"><span>The times are</span>
+        <select id="meaning"><option value="auto">Detect automatically</option><option value="starts">Start times (like YouTube timestamps)</option><option value="lengths">Track lengths (like Discogs)</option></select></label>
+      <label class="field" id="groupWrap"><span id="groupLabel">Which side</span><select id="group"></select></label>
+      <label class="field" id="totalWrap"><span>Length of the recording (optional, e.g. 45:12)</span><input type="text" id="total" placeholder="h:mm:ss"></label>
+      <label class="field"><span>First track starts at (shifts every label)</span><input type="text" id="offset" placeholder="0:00"></label>
+      <label class="field"><span>Labels</span><select id="output"><option value="regions">Regions (start to end of each track)</option><option value="points">Points (just the start of each track)</option></select></label>
+    </div>
+    <label class="opt"><input type="checkbox" id="numbers"> Put track numbers in front (01 Intro, 02 …), so the files sort in order</label>
+    <label class="opt"><input type="checkbox" id="safe" checked> Replace characters not allowed in file names ( / \ : * ? " &lt; &gt; | )</label>
+  </div>
+
+  <h2>Preview</h2>
+  <div id="summary" class="muted">Paste a track list to see the labels.</div>
+  <div id="notes" class="notes"></div>
+  <div class="card" style="overflow-x:auto"><table id="preview"><thead><tr><th>#</th><th>Start</th><th>End</th><th>Length</th><th>Name</th></tr></thead><tbody></tbody></table></div>
+  <p><button class="btn" id="dl" type="button" disabled>Download label file</button> <button class="btn secondary" id="copy" type="button" disabled>Copy</button></p>
+
+  <h2>Then, in Audacity</h2>
+  <ol>
+    <li><b>Import the labels.</b> Audacity 3: <b>File → Import → Labels…</b> and pick the downloaded file. Audacity 4: open the <b>Label Editor</b> and use its <b>Import</b> button.</li>
+    <li><b>Check the edges.</b> Zoom in where tracks meet and drag a label edge onto the gap if it's off by a moment.</li>
+    <li><b>Split into files.</b> <b>File → Export Audio…</b>, choose <b>Multiple Files</b>, split files based on <b>Labels</b>, and name files using the <b>label name</b>. (Older versions: <b>File → Export → Export Multiple…</b>. In Audacity 4 this needs version 4.0.1 or newer.)</li>
+  </ol>
+
+  <h2>Questions</h2>
+  <p><b>Start times or track lengths?</b> A YouTube description lists where each track <i>starts</i> (0:00, 3:25, 7:40 …). Discogs and CD track lists give how <i>long</i> each track is (3:25, 4:15 …). The page guesses from the numbers; change “The times are” if it guessed wrong.</p>
+  <p><b>My vinyl rip is a little off.</b> Track lengths printed on a sleeve or on Discogs are rounded, and records have gaps between tracks, so labels made from lengths drift. Record each side separately and pick that side above, or use the names-only method with Label Sounds, which finds the real gaps.</p>
+  <p><b>What about a .cue file?</b> Open it with the file button. Track titles and start times are read from it (and the performer, when it differs from the album's). If the cue sheet covers several audio files, choose the one you have open.</p>
+  <p><b>Is my list sent anywhere?</b> No. Everything happens in your browser. Only an anonymous page-visit count is recorded (no cookies, no personal data).</p>
+  <p><b>Not affiliated</b> with Audacity, Muse Group, YouTube or Discogs.</p>
+  <footer>A small free tool. <a href="../">More free tools</a> · Also: <a href="../audacity-labels/">turn Audacity point labels into regions</a></footer>
+</main>
+<script>
+// Track list -> Audacity label file. Browser + Node.
+// Inputs: pasted timestamps (YouTube description style), track lengths (Discogs style),
+// a .cue sheet, or a plain list of names applied to an existing Audacity label file.
+(function (root) {
+  "use strict";
+
+  const TIME = String.raw`\d{1,3}(?::\d{1,2}){1,2}(?:[.,]\d{1,3})?`;
+  const SEP = String.raw`[\s\-–—|:.,)>»~]*`;
+
+  // "1:02:03.5" / "75:30" / "3:05" -> seconds. Returns NaN when not a time.
+  function parseTime(s) {
+    const m = String(s).trim().match(/^(\d{1,3})(?::(\d{1,2}))(?::(\d{1,2}))?(?:[.,](\d{1,3}))?$/);
+    if (!m) {
+      const n = String(s).trim().replace(",", ".");
+      return /^\d+(\.\d+)?$/.test(n) ? Number(n) : NaN;
+    }
+    const frac = m[4] ? Number("0." + m[4]) : 0;
+    if (m[3] != null) {
+      if (Number(m[2]) > 59 || Number(m[3]) > 59) return NaN;
+      return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + frac;
+    }
+    if (Number(m[2]) > 59) return NaN;
+    return Number(m[1]) * 60 + Number(m[2]) + frac;
+  }
+
+  function fmtClock(sec) {
+    if (!isFinite(sec)) return "";
+    const neg = sec < 0; sec = Math.abs(sec);
+    let ms = Math.round(sec * 1000);
+    const h = Math.floor(ms / 3600000); ms -= h * 3600000;
+    const m = Math.floor(ms / 60000); ms -= m * 60000;
+    const s = Math.floor(ms / 1000); ms -= s * 1000;
+    const p = (n, w) => String(n).padStart(w, "0");
+    return (neg ? "-" : "") + (h ? h + ":" + p(m, 2) : String(m)) + ":" + p(s, 2) + (ms ? "." + p(ms, 3).replace(/0+$/, "") : "");
+  }
+
+  // Leading position markers: "A1", "B12", "1-03", "CD2-05", "1.", "01 -", "3)", "#4", "Track 5:".
+  const POS = /^\s*(?:(?:track|tr\.?)\s*(\d{1,3})\s*[:.)\-–—]?\s+|#\s*(\d{1,3})[\s.:)\-–—]+|(cd|disc|disk)\s*(\d{1,2})\s*[-–.]\s*(\d{1,3})[\s.:)\-–—]+|(\d{1,2})\s*-\s*(\d{1,3})(?=\t|\s{2,}|\s*[.)]\s)[\s.)]*|([A-Ha-h])\s?(\d{1,2})(?=[\s.:)\-–—])[\s.:)\-–—]*|(\d{1,3})(?:\s*[.)]\s+|\s+[-–—]\s+|\t+|\s*\.\t*))/i;
+
+  function stripPosition(text) {
+    const m = text.match(POS);
+    if (!m) return { text, group: null };
+    let group = null;
+    if (m[3]) group = "Disc " + Number(m[4]);
+    else if (m[6]) group = "Disc " + Number(m[6]);
+    else if (m[8]) group = "Side " + m[8].toUpperCase();
+    return { text: text.slice(m[0].length), group, hadPos: true };
+  }
+  // A zero-padded "01 Title" (no punctuation) is a track number too.
+  function stripPadded(text) {
+    const m = text.match(/^\s*0\d\s+(?=\S)/);
+    return m ? text.slice(m[0].length) : text;
+  }
+
+  function cleanTitle(t) {
+    return t.replace(/\t+/g, " ").replace(/^[\s\-–—|:.,)>»~•*·]+/, "").replace(/[\s\-–—|:,(<«~•*·]+$/, "").replace(/\s{2,}/g, " ").trim();
+  }
+
+  // Parse one pasted line. Returns {time, timeAt:"start"|"end"|null, title, group}.
+  function parseLine(raw) {
+    let line = raw.replace(/^﻿/, "").replace(/^\s*[•*·▶►\-–—]\s+/, "");
+    let group = null;
+    // Time first ("0:00 Intro", "[01:02:03] Song", "1) 0:00 - Song")
+    const lead = line.match(new RegExp(String.raw`^\s*(?:\d{1,3}\s*[.)]\s*)?[\[(]?(` + TIME + String.raw`)[\])]?(?=\s|$|[\-–—|:.,)>»~])` + SEP + "(.*)$"));
+    if (lead && isFinite(parseTime(lead[1]))) {
+      let rest = lead[2];
+      // "0:00 - 3:25 Song" (start - end): keep the start, drop the end time.
+      const range = rest.match(new RegExp(String.raw`^[\[(]?(` + TIME + String.raw`)[\])]?(?=\s|$)` + SEP + "(.*)$"));
+      if (range && isFinite(parseTime(range[1]))) rest = range[2];
+      const s = stripPosition(rest);
+      return { time: parseTime(lead[1]), timeAt: "start", title: cleanTitle(s.text), group: s.group };
+    }
+    // Position, then title, then time ("A1  Artist – Title  3:25", "Song (3:25)", "Song - 1:02:03")
+    const s = stripPosition(line); group = s.group; line = s.text;
+    // The time must be separated from the title (space, dash, bracket, tab).
+    const tail = line.match(new RegExp(String.raw`^(.*?)(?:^|[\s\-–—|,~\[(])[\[(]?(` + TIME + String.raw`)[\])]?\s*$`));
+    if (tail && isFinite(parseTime(tail[2]))) {
+      return { time: parseTime(tail[2]), timeAt: "end", title: cleanTitle(s.hadPos ? tail[1] : stripPadded(tail[1])), group };
+    }
+    return { time: NaN, timeAt: null, title: cleanTitle(s.hadPos ? line : stripPadded(line)), group };
+  }
+
+  // Lines that carry no track: headings like "Tracklist:", "Side A", "Disc 2", "---".
+  function headingGroup(line) {
+    const t = line.trim().replace(/[:\-–—=]+$/, "").trim();
+    let m = t.match(/^(?:side|face|seite)\s+([A-Ha-h1-8])$/i);
+    if (m) return "Side " + m[1].toUpperCase();
+    m = t.match(/^(?:cd|disc|disk|lp)\s*(\d{1,2})$/i);
+    if (m) return "Disc " + Number(m[1]);
+    return null;
+  }
+  const isHeading = (line) => /^\s*(?:track\s*list(?:ing)?|tracks|timestamps|chapters|setlist|set list|songs)\s*:?\s*$/i.test(line) || /^\s*[-=_*#~]{3,}\s*$/.test(line);
+
+  // ---------------- CUE sheets ----------------
+  function unq(s) { s = s.trim(); return /^".*"$/.test(s) ? s.slice(1, -1) : s; }
+  function parseCue(text) {
+    const lines = text.replace(/^﻿/, "").split(/\r\n|\r|\n/);
+    const tracks = [], problems = [];
+    let file = null, album = { title: "", performer: "" }, cur = null, files = [];
+    lines.forEach((ln, i) => {
+      const m = ln.trim().match(/^(\w+)\s*(.*)$/);
+      if (!m) return;
+      const key = m[1].toUpperCase(), val = m[2];
+      if (key === "FILE") { file = unq(val.replace(/\s+\w+\s*$/, "")); files.push(file); }
+      else if (key === "TRACK") { cur = { num: Number(val.split(/\s+/)[0]), title: "", performer: "", file, time: NaN, line: i + 1 }; tracks.push(cur); }
+      else if (key === "TITLE") { if (cur) cur.title = unq(val); else album.title = unq(val); }
+      else if (key === "PERFORMER") { if (cur) cur.performer = unq(val); else album.performer = unq(val); }
+      else if (key === "INDEX" && cur) {
+        const im = val.match(/^(\d+)\s+(\d+):(\d{1,2}):(\d{1,2})$/);
+        if (!im) { problems.push({ line: i + 1, reason: "unreadable INDEX time" }); return; }
+        const idx = Number(im[1]), sec = Number(im[2]) * 60 + Number(im[3]) + Number(im[4]) / 75;
+        if (idx === 1 || (idx === 0 && !isFinite(cur.time))) cur.time = sec, cur.idx = idx;
+      }
+    });
+    tracks.forEach((t) => { if (!isFinite(t.time)) problems.push({ line: t.line, reason: `track ${t.num} has no INDEX 01 time` }); });
+    const good = tracks.filter((t) => isFinite(t.time));
+    return {
+      kind: "cue", album, files,
+      tracks: good.map((t) => ({ time: t.time, title: t.title || "Track " + String(t.num).padStart(2, "0"), artist: t.performer && t.performer !== album.performer ? t.performer : "", group: files.length > 1 ? t.file : null })),
+      problems,
+    };
+  }
+  const looksLikeCue = (text) => /^\s*(?:REM\s.*\r?\n\s*)*(?:PERFORMER|TITLE|FILE|CATALOG|REM)\b/im.test(text) && /^\s*TRACK\s+\d+\s+AUDIO/im.test(text) && /^\s*INDEX\s+0?1\s+\d+:\d+:\d+/im.test(text);
+
+  // ---------------- Audacity label files (for "names only") ----------------
+  function parseLabels(text) {
+    const labels = [], problems = [];
+    text.replace(/^﻿/, "").split(/\r\n|\r|\n/).forEach((line, i) => {
+      if (!line.trim() || /^\\/.test(line)) return;
+      let parts = line.split("\t");
+      if (parts.length < 2) { const m = line.match(/^\s*(\S+)\s+(\S+)\s*(.*)$/); parts = m ? [m[1], m[2], m[3]] : [line]; }
+      const num = (s) => Number(String(s).trim().replace(",", "."));
+      const start = num(parts[0]), end = num(parts[1]);
+      if (!isFinite(start) || !isFinite(end) || !String(parts[0]).trim() || !String(parts[1]).trim()) { problems.push({ line: i + 1, reason: "not a label line" }); return; }
+      labels.push({ start, end, text: parts.slice(2).join(" ").trim() });
+    });
+    labels.sort((a, b) => a.start - b.start || a.end - b.end);
+    return { labels, problems };
+  }
+  const looksLikeLabels = (text) => {
+    const ls = text.split(/\r\n|\r|\n/).filter((l) => l.trim() && !/^\\/.test(l));
+    return ls.length > 0 && ls.every((l) => /^\s*\d+(?:[.,]\d+)?\s+\d+(?:[.,]\d+)?(\s|$)/.test(l));
+  };
+
+  // ---------------- Pasted track lists ----------------
+  function parseList(text) {
+    const lines = text.replace(/^﻿/, "").split(/\r\n|\r|\n/);
+    const rows = [], skipped = [];
+    let group = null;
+    lines.forEach((ln, i) => {
+      if (!ln.trim()) return;
+      const g = headingGroup(ln);
+      if (g) { group = g; return; }
+      if (isHeading(ln)) return;
+      const r = parseLine(ln);
+      r.line = i + 1; r.raw = ln.trim();
+      r.group = r.group || group;
+      rows.push(r);
+    });
+    const timed = rows.filter((r) => isFinite(r.time));
+    // Mostly timed: untimed lines are comments ("Enjoy!", "Follow me on…") and are reported.
+    if (timed.length >= 2 && timed.length >= rows.length * 0.5) {
+      rows.filter((r) => !isFinite(r.time)).forEach((r) => skipped.push({ line: r.line, text: r.raw, reason: "no time on this line" }));
+      return { kind: "timed", rows: timed, skipped };
+    }
+    if (timed.length === 1 && rows.length === 1) return { kind: "timed", rows: timed, skipped };
+    return { kind: "names", rows: rows.map((r) => ({ title: isFinite(r.time) ? r.title : r.title, group: r.group, line: r.line, raw: r.raw })).filter((r) => r.title), skipped };
+  }
+
+  // Start times (YouTube) or lengths (Discogs)? Start times rise from near zero.
+  function guessMeaning(rows) {
+    const t = rows.map((r) => r.time);
+    const rising = t.every((x, i) => i === 0 || x > t[i - 1]);
+    const groups = new Set(rows.map((r) => r.group || ""));
+    if (groups.size > 1) {
+      // Discogs: each side restarts; times rarely rise across the whole list.
+      const perGroupRising = [...groups].every((g) => { const tt = rows.filter((r) => (r.group || "") === g).map((r) => r.time); return tt.every((x, i) => i === 0 || x > tt[i - 1]) && tt[0] < 60; });
+      if (!rising && perGroupRising) return "starts";
+    }
+    if (rising && t[0] < 60) return "starts";
+    if (rising && rows[0].timeAt === "start") return "starts";
+    return "lengths";
+  }
+
+  function groupsOf(rows) {
+    const out = [];
+    rows.forEach((r) => { const g = r.group || ""; if (!out.includes(g)) out.push(g); });
+    return out.length > 1 || out[0] !== "" ? out : [];
+  }
+
+  const UNSAFE = /[\\/:*?"<>|]+/g;
+
+  // Main entry. opts: {meaning:"auto"|"starts"|"lengths", group:""|name, offset, total,
+  //   numbers, safe, artistFirst, output:"regions"|"points", labelsText (for names mode)}
+  function build(text, opts) {
+    const o = Object.assign({ meaning: "auto", group: "", offset: 0, total: NaN, numbers: false, safe: true, output: "regions", labelsText: "", pad: 2 }, opts || {});
+    const res = { kind: null, meaning: null, labels: [], notes: [], skipped: [], groups: [], error: null };
+    if (!text || !text.trim()) { res.error = "Paste a track list or open a file first."; return res; }
+    let tracks;
+    if (looksLikeCue(text)) {
+      const cue = parseCue(text);
+      res.kind = "cue"; res.meaning = "starts"; res.album = cue.album;
+      cue.problems.forEach((p) => res.skipped.push({ line: p.line, text: "", reason: p.reason }));
+      tracks = cue.tracks.map((t) => ({ time: t.time, title: t.artist ? t.artist + " - " + t.title : t.title, group: t.group }));
+      res.groups = groupsOf(tracks);
+      if (res.groups.length > 1) res.notes.push(`This cue sheet covers ${res.groups.length} audio files; times restart in each one. Pick the file you have open in Audacity.`);
+    } else if (looksLikeLabels(text)) {
+      res.error = "This looks like an Audacity label file, not a track list. Put it in the “existing labels” box below and paste the track names here.";
+      return res;
+    } else {
+      const p = parseList(text);
+      res.skipped = p.skipped;
+      if (p.kind === "names") {
+        res.kind = "names";
+        return applyNames(p.rows, o, res);
+      }
+      res.kind = "timed";
+      res.meaning = o.meaning === "auto" ? guessMeaning(p.rows) : o.meaning;
+      tracks = p.rows.map((r) => ({ time: r.time, title: r.title, group: r.group }));
+      res.groups = groupsOf(tracks);
+    }
+    if (!tracks.length) { res.error = "No tracks with times were found."; return res; }
+
+    // Pick one side / disc / file, or keep all.
+    let sel = tracks, g = o.group;
+    if (res.groups.length > 1 && g && res.groups.includes(g)) sel = tracks.filter((t) => (t.group || "") === g);
+    else if (res.groups.length > 1 && res.kind === "cue") sel = tracks.filter((t) => (t.group || "") === res.groups[0]), (g = res.groups[0]);
+    res.selectedGroup = res.groups.length > 1 ? g || "" : "";
+
+    const off = isFinite(o.offset) ? Number(o.offset) : 0;
+    let labels = [];
+    if (res.meaning === "lengths") {
+      let at = off;
+      sel.forEach((t) => { labels.push({ start: at, end: at + t.time, title: t.title }); at += t.time; });
+      res.length = at - off;
+      if (res.groups.length > 1 && !g) res.notes.push(`Tracks from ${res.groups.join(", ")} are placed one after another. If each side is a separate recording, choose one side.`);
+      res.notes.push("Track lengths from Discogs or a CD are only approximate for a recording. After importing, drag each label edge to the silence between tracks, or use the names-only method below with Label Sounds.");
+    } else {
+      const bad = [];
+      sel.forEach((t, i) => { if (i && t.time <= sel[i - 1].time) bad.push(t); });
+      if (bad.length && (res.groups.length <= 1 || g)) {
+        res.notes.push(`${bad.length} time${bad.length === 1 ? " is" : "s are"} not later than the one before (${bad.slice(0, 3).map((b) => fmtClock(b.time) + " " + b.title).join("; ")}). Check the list; those labels may overlap.`);
+      }
+      if (res.groups.length > 1 && !g && res.kind !== "cue") res.notes.push(`The list has ${res.groups.join(", ")}, and times restart in each. Choose one to get correct positions.`);
+      sel.forEach((t, i) => {
+        const next = sel[i + 1];
+        const end = next && next.time > t.time ? next.time + off : NaN;
+        labels.push({ start: t.time + off, end, title: t.title });
+      });
+      const last = labels[labels.length - 1];
+      const total = Number(o.total);
+      if (isFinite(total) && total > 0) {
+        if (total > last.start) last.end = total;
+        else res.notes.push(`The audio length (${fmtClock(total)}) is not after the last track's start (${fmtClock(last.start)}), so it was ignored.`);
+      }
+    }
+    if (o.output === "points") labels.forEach((l) => (l.end = l.start));
+    else labels.forEach((l) => { if (!isFinite(l.end)) l.end = l.start; });
+    const lastPoint = o.output !== "points" && labels.length && labels[labels.length - 1].end === labels[labels.length - 1].start;
+    if (lastPoint && res.meaning === "starts") res.notes.push("The last track's end is unknown, so its label is a point. Export Multiple still exports it up to the end of the audio. Enter the audio length to make it a region.");
+    if (off) res.notes.push(`All times are shifted by ${fmtClock(off)}.`);
+    res.labels = finish(labels, o);
+    return res;
+  }
+
+  function finish(labels, o) {
+    const n = labels.length, w = Math.max(o.pad || 2, String(n).length);
+    return labels.map((l, i) => {
+      let t = l.title || "Track " + String(i + 1).padStart(w, "0");
+      if (o.numbers) t = String(i + 1).padStart(w, "0") + " " + t;
+      if (o.safe) t = t.replace(UNSAFE, " - ").replace(/\s*-\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").replace(/^[\s.-]+|[\s.]+$/g, "");
+      return { start: round6(l.start), end: round6(Math.max(l.end, l.start)), text: t };
+    });
+  }
+  const round6 = (x) => Math.round(x * 1e6) / 1e6;
+
+  function applyNames(rows, o, res) {
+    if (!o.labelsText || !o.labelsText.trim()) {
+      res.needsLabels = true;
+      res.names = rows.map((r) => r.title);
+      res.error = `Found ${rows.length} name${rows.length === 1 ? "" : "s"} but no times. To use names only, also open the label file you exported from Audacity (for example after Analyze › Label Sounds) in the “existing labels” box.`;
+      return res;
+    }
+    const pl = parseLabels(o.labelsText);
+    if (!pl.labels.length) { res.error = "The existing label file has no labels Audacity could have written (expected: start, end, text on each line)."; return res; }
+    const labels = pl.labels, names = rows.map((r) => r.title);
+    res.labelsIn = labels.length;
+    const n = Math.min(labels.length, names.length);
+    const out = labels.map((l, i) => ({ start: l.start, end: l.end, title: i < n ? names[i] : l.text }));
+    if (names.length < labels.length) res.notes.push(`There are ${labels.length} labels but only ${names.length} names; the last ${labels.length - names.length} label${labels.length - names.length === 1 ? " keeps its" : "s keep their"} old text. Label Sounds may have split a track in two, or found a gap inside one.`);
+    if (names.length > labels.length) res.notes.push(`There are ${names.length} names but only ${labels.length} labels; these names were not used: ${names.slice(labels.length, labels.length + 5).join("; ")}${names.length - labels.length > 5 ? "…" : ""}.`);
+    if (pl.problems.length) res.notes.push(`${pl.problems.length} line${pl.problems.length === 1 ? "" : "s"} in the label file could not be read and were skipped.`);
+    if (o.output === "points") out.forEach((l) => (l.end = l.start));
+    res.labels = finish(out, o);
+    return res;
+  }
+
+  function serialize(labels) {
+    return labels.map((l) => `${l.start.toFixed(6)}\t${l.end.toFixed(6)}\t${l.text}`).join("\n") + (labels.length ? "\n" : "");
+  }
+
+  const api = { parseTime, fmtClock, parseLine, parseList, parseCue, parseLabels, looksLikeCue, looksLikeLabels, guessMeaning, build, serialize, stripPosition };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.Tracklist = api;
+})(this);
+</script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const DEMO_YT = "Tracklist:\n0:00 Intro\n2:47 Morning Light\n6:58 Night Drive / Reprise\n11:20 Last Call\n\nThanks for listening!";
+  const DEMO_DG = "A1\tMorning Light\t4:11\nA2\tNight Drive\t3:52\nA3\tSlow Burn\t5:05\nB1\tHarbour\t4:40\nB2\tLast Call\t6:02";
+  let res = null, fromDemo = false, groupFor = "";
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function countExport(kind) {
+    if (fromDemo || !window.goatcounter || !window.goatcounter.count) return;
+    window.goatcounter.count({ path: "tracklist-labels/" + kind, title: "Tracklist labels " + kind, event: true });
+  }
+  function time(id) { const v = $(id).value.trim(); return v ? Tracklist.parseTime(v) : NaN; }
+  function run() {
+    const text = $("input").value;
+    ["dl", "copy"].forEach((x) => ($(x).disabled = true));
+    const tbody = document.querySelector("#preview tbody");
+    tbody.innerHTML = ""; $("notes").innerHTML = "";
+    if (!text.trim()) { res = null; $("options").hidden = true; $("summary").textContent = "Paste a track list to see the labels."; return; }
+    const notes = [];
+    const tot = time("total"), off = time("offset");
+    if ($("total").value.trim() && !isFinite(tot)) notes.push("The recording length isn't a time like 45:12 or 1:02:03, so it was ignored.");
+    if ($("offset").value.trim() && !isFinite(off)) notes.push("The start time isn't a time like 0:04, so it was ignored.");
+    res = Tracklist.build(text, { meaning: $("meaning").value, group: $("group").value, total: tot, offset: isFinite(off) ? off : 0, numbers: $("numbers").checked, safe: $("safe").checked, output: $("output").value, labelsText: $("labelsInput").value });
+    // groups (sides / discs / cue files)
+    const key = res.groups.join("\u0001");
+    if (key !== groupFor) {
+      groupFor = key;
+      const kind = res.kind === "cue" ? "file" : /^Disc/.test(res.groups[0] || "") ? "disc" : "side";
+      $("groupLabel").textContent = "Which " + kind;
+      $("group").innerHTML = (res.kind === "cue" ? "" : `<option value="">All, one after another</option>`) + res.groups.map((g) => `<option>${esc(g)}</option>`).join("");
+      if (res.selectedGroup) $("group").value = res.selectedGroup;
+    }
+    $("groupWrap").style.display = res.groups.length > 1 ? "block" : "none";
+    $("meaningWrap").style.display = res.kind === "timed" ? "block" : "none";
+    $("totalWrap").style.display = res.meaning === "starts" ? "block" : "none";
+    $("options").hidden = false;
+    if (res.needsLabels) $("namesCard").open = true;
+    if (res.error) { $("summary").innerHTML = `<span class="error">${esc(res.error)}</span>`; $("notes").innerHTML = notes.map((n) => `<div>• ${esc(n)}</div>`).join(""); return; }
+    const all = notes.concat(res.notes);
+    res.skipped.slice(0, 5).forEach((s) => all.push(`Skipped line ${s.line}${s.text ? " (" + s.text.slice(0, 60) + ")" : ""}: ${s.reason}.`));
+    if (res.skipped.length > 5) all.push(`${res.skipped.length - 5} more lines were skipped.`);
+    const L = res.labels;
+    const what = res.kind === "cue" ? "a cue sheet" : res.kind === "names" ? "names applied to your labels" : res.meaning === "starts" ? "start times" : "track lengths";
+    $("summary").textContent = `${L.length} track${L.length === 1 ? "" : "s"} from ${what}` + (L.length ? `, ${Tracklist.fmtClock(L[0].start)} to ${Tracklist.fmtClock(L[L.length - 1].end)}.` : ".");
+    $("notes").innerHTML = all.map((n) => `<div>• ${esc(n)}</div>`).join("");
+    const show = L.length > 200 ? L.slice(0, 200) : L;
+    tbody.innerHTML = show.map((l, i) => `<tr><td>${i + 1}</td><td class="t">${Tracklist.fmtClock(l.start)}</td><td class="t">${l.end > l.start ? Tracklist.fmtClock(l.end) : "–"}</td><td class="t">${l.end > l.start ? Tracklist.fmtClock(l.end - l.start) : ""}</td><td>${esc(l.text)}</td></tr>`).join("") +
+      (L.length > 200 ? `<tr><td colspan="5" class="muted">… ${L.length - 200} more …</td></tr>` : "");
+    if (L.length) ["dl", "copy"].forEach((x) => ($(x).disabled = false));
+  }
+  $("dl").addEventListener("click", () => {
+    if (!res || !res.labels.length) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([Tracklist.serialize(res.labels)], { type: "text/plain" }));
+    a.download = "labels.txt"; countExport("download");
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("copy").addEventListener("click", () => {
+    if (!res || !res.labels.length) return;
+    countExport("copy"); navigator.clipboard && navigator.clipboard.writeText(Tracklist.serialize(res.labels));
+    $("copy").textContent = "Copied"; setTimeout(() => { $("copy").textContent = "Copy"; }, 1500);
+  });
+  const fresh = () => { fromDemo = false; run(); };
+  $("input").addEventListener("input", fresh);
+  $("labelsInput").addEventListener("input", fresh);
+  ["total", "offset"].forEach((x) => $(x).addEventListener("input", run));
+  ["meaning", "group", "output", "numbers", "safe"].forEach((x) => $(x).addEventListener("change", run));
+  $("demoYt").addEventListener("click", () => { $("input").value = DEMO_YT; $("total").value = "15:02"; fromDemo = true; run(); });
+  $("demoDg").addEventListener("click", () => { $("input").value = DEMO_DG; $("total").value = ""; fromDemo = true; run(); });
+  $("file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) f.text().then((t) => { $("input").value = t; fresh(); }); });
+  $("labelsFile").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) f.text().then((t) => { $("labelsInput").value = t; $("namesCard").open = true; fresh(); }); });
+  run();
+})();
+</script>
+</body>
+</html>
